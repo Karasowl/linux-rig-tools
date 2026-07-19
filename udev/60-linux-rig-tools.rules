@@ -1,0 +1,19 @@
+# linux-rig-tools — user access to the hidraw nodes of target devices
+# https://github.com/Karasowl/linux-rig-tools
+# TAG+="uaccess" grants access to the locally logged-in user on all
+# systemd-based distros (Arch, Debian/Ubuntu, Fedora, openSUSE, ...).
+
+# NZXT N9 Z890 embedded fan/RGB controller
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2023", TAG+="uaccess"
+
+# Cooler Master MasterLiquid Core Nex Digital
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="2516", ATTRS{idProduct}=="0232", TAG+="uaccess"
+
+# Chassis "309 LED Matrix Controller"
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="ff00", ATTRS{idProduct}=="020c", TAG+="uaccess"
+
+# Chassis USB screen/audio composite
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="26ce", ATTRS{idProduct}=="0a09", TAG+="uaccess"
+
+# Evision RGB keyboard
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="320f", ATTRS{idProduct}=="5000", TAG+="uaccess"

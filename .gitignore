@@ -1,0 +1,14 @@
+# build artifacts
+dist/
+*.deb
+*.pkg.tar.zst
+
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# USB captures may contain device serials — share them via issues instead
+captures/*.pcap
+captures/*.pcapng

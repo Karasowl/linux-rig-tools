@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# rig-profiles — quiet/balanced/performance profiles for CPU and NVIDIA GPU,
+# no vendor software required.
+#   CPU: cpufreq governor + energy_performance_preference (intel_pstate / amd-pstate)
+#   GPU: NVIDIA power limit via nvidia-smi
+# Part of https://github.com/Karasowl/linux-rig-tools
+set -u
+
+VERSION="0.1.0"
+
+usage() {
+cat <<'EOF'
+rig-profiles — apply performance profiles without vendor software
+
+Usage:
+  rig-profiles status
+  rig-profiles cpu  quiet|balanced|performance
+  rig-profiles gpu  quiet|balanced|performance
+  rig-profiles all  quiet|balanced|performance
+
+Profile        CPU governor   CPU EPP               GPU power limit
+  quiet        powersave      power                 max(70% of default, min)
+  balanced     powersave      balance_performance   default
+  performance  performance    performance           max
+
+Applying cpu/gpu/all needs root (sudo). GPU power limit resets on reboot.
+EOF
+}
+
+need_root() {
+  if [[ $EUID -ne 0 ]]; then
+    echo "error: '$1' needs root — run with sudo" >&2
+    exit 1
+  fi
+}
+
+cpu_profile() {
+  local p=$1 gov epp
+  case $p in
+    quiet)       gov=powersave;   epp=power ;;
+    balanced)    gov=powersave;   epp=balance_performance ;;
+    performance) gov=performance; epp=performance ;;
+    *) echo "error: unknown profile '$p'" >&2; exit 1 ;;
+  esac
+  need_root cpu
+  local pol n=0
+  for pol in /sys/devices/system/cpu/cpufreq/policy*; do
+    [[ -d $pol ]] || continue
+    echo "$gov" > "$pol/scaling_governor" 2>/dev/null || true
+    if [[ -f "$pol/energy_performance_preference" ]]; then
+      echo "$epp" > "$pol/energy_performance_preference" 2>/dev/null || true
+    fi
+    n=$((n+1))
+  done
+  [[ $n -eq 0 ]] && { echo "error: no cpufreq policies found" >&2; return 1; }
+  echo "cpu: '$p' applied to $n policies (governor=$gov, epp=$epp)"
+}
+
+gpu_profile() {
+  local p=$1
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "gpu: nvidia-smi not found — skipping (AMD/Intel GPU profiles: planned)" >&2
+    return 1
+  fi
+  need_root gpu
+  local q def min max target
+  q=$(nvidia-smi --query-gpu=power.default_limit,power.min_limit,power.max_limit \
+      --format=csv,noheader,nounits | head -n1)
+  IFS=', ' read -r def min max <<< "$q"
+  case $p in
+    quiet)       target=$(awk -v d="$def" -v m="$min" 'BEGIN{t=d*0.70; if(t<m)t=m; printf "%.0f", t}') ;;
+    balanced)    target=$(awk -v d="$def" 'BEGIN{printf "%.0f", d}') ;;
+    performance) target=$(awk -v x="$max" 'BEGIN{printf "%.0f", x}') ;;
+    *) echo "error: unknown profile '$p'" >&2; exit 1 ;;
+  esac
+  if nvidia-smi -pl "$target" >/dev/null; then
+    echo "gpu: '$p' applied (power limit ${target} W; default=${def}, min=${min}, max=${max})"
+    echo "gpu: note — the limit resets on reboot; re-run rig-profiles or add a systemd unit"
+  else
+    echo "error: nvidia-smi -pl $target failed" >&2
+    return 1
+  fi
+}
+
+status() {
+  local pol=/sys/devices/system/cpu/cpufreq/policy0
+  echo "CPU:"
+  echo "  driver:    $(cat "$pol/scaling_driver" 2>/dev/null || echo n/a)"
+  echo "  governor:  $(cat "$pol/scaling_governor" 2>/dev/null || echo n/a)"
+  echo "  epp:       $(cat "$pol/energy_performance_preference" 2>/dev/null || echo n/a)"
+  echo "  epp opts:  $(cat "$pol/energy_performance_available_preferences" 2>/dev/null || echo n/a)"
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    echo "GPU (name, limit, default, max, temp):"
+    nvidia-smi --query-gpu=name,power.limit,power.default_limit,power.max_limit,temperature.gpu \
+      --format=csv,noheader 2>/dev/null | sed 's/^/  /'
+  fi
+}
+
+case "${1:-}" in
+  status)      status ;;
+  cpu)         cpu_profile "${2:?usage: rig-profiles cpu quiet|balanced|performance}" ;;
+  gpu)         gpu_profile "${2:?usage: rig-profiles gpu quiet|balanced|performance}" ;;
+  all)         cpu_profile "${2:?usage: rig-profiles all quiet|balanced|performance}"
+               gpu_profile "$2" || true ;;
+  --version)   echo "rig-profiles $VERSION" ;;
+  -h|--help|"") usage ;;
+  *)           usage; exit 1 ;;
+esac
