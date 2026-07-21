@@ -1,0 +1,441 @@
+#!/usr/bin/env python3
+# nzxt-n9-first-write-lab — closed laboratory harness for ONE controlled
+# lighting write pair on the NZXT N9 embedded controller (1e71:2023).
+#
+# OFFLINE-FIRST. This unit builds and validates frozen frames only. Never run
+# apply-red or restore-white against real hardware in this unit. Writes are
+# gated behind an explicit confirmation token and are lighting-only.
+#
+# Stdlib only. No hidapi. No arbitrary color, brightness, channel, Report ID,
+# path, LED count, or payload inputs.
+#
+# Part of https://github.com/Karasowl/linux-rig-tools
+"""Closed lab harness for the first N9 lighting write (red 7% / white 7%)."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import sys
+import time
+from typing import Final
+
+# --- Frozen protocol constants (capture-validated at 7%, never parameterized) -
+
+REPORT_LEN: Final[int] = 512
+N_LED: Final[int] = 49
+LOAD_HEADER: Final[bytes] = bytes([0x26, 0x04, 0x20, 0x00])
+# GRB triple for sRGB #FF0000 at 7% (D12): R maps to second position = 0x4a
+RED_TRIPLE: Final[bytes] = bytes([0x00, 0x4A, 0x00])
+# GRB triple for sRGB #FFFFFF at 7% (D11): each component = 0x4a
+WHITE_TRIPLE: Final[bytes] = bytes([0x4A, 0x4A, 0x4A])
+# Fixed commit frame prefix, byte-identical across every Fixed capture
+COMMIT_PREFIX: Final[bytes] = bytes.fromhex(
+    "26062000010000310000800032000001"
+)
+COMMIT_GAP_S: Final[float] = 0.003  # exactly 3 ms between data and commit
+
+# Target HID identity (sysfs HID_ID form, bus 0003 = USB)
+TARGET_HID_ID: Final[str] = "0003:00001E71:00002023"
+DESCRIPTOR_LEN: Final[int] = 150
+# HID items: Report ID 0x26, Report Count 1, Output (Data,Var,Abs,Vol)
+OUTPUT_26_SEQ: Final[bytes] = bytes([0x85, 0x26, 0x09, 0x01, 0x91, 0x82])
+
+# Hard confirmation token. Must mention 1E71:2023 and LIGHTING-ONLY.
+# Chosen so accidental invocation cannot succeed by habit or tab-complete.
+CONFIRM_TOKEN: Final[str] = "I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE"
+
+# Overridable only for offline unit tests (never a CLI path argument).
+SYSFS_HIDRAW_CLASS: str = "/sys/class/hidraw"
+DEV_DIR: str = "/dev"
+
+
+# --- Frame construction and validation --------------------------------------
+
+
+def build_color_frame(triple: bytes) -> bytes:
+    """Build a 512-byte Fixed lighting frame with 49 identical GRB triples."""
+    if len(triple) != 3:
+        raise ValueError("triple must be exactly 3 bytes")
+    buf = bytearray(REPORT_LEN)
+    buf[0:4] = LOAD_HEADER
+    for i in range(N_LED):
+        start = 4 + i * 3
+        buf[start : start + 3] = triple
+    return bytes(buf)
+
+
+def build_commit_frame() -> bytes:
+    """Build the fixed 512-byte commit frame (26 06 ...)."""
+    if len(COMMIT_PREFIX) != 16:
+        raise ValueError("commit prefix must be exactly 16 bytes")
+    return COMMIT_PREFIX + bytes(REPORT_LEN - 16)
+
+
+def validate_color_frame(frame: bytes, expected_triple: bytes) -> None:
+    """Abort if a color frame is not the exact frozen shape."""
+    if len(frame) != REPORT_LEN:
+        raise ValueError(
+            "color frame length is %d, expected %d" % (len(frame), REPORT_LEN)
+        )
+    if frame[0:4] != LOAD_HEADER:
+        raise ValueError(
+            "color frame header is %s, expected %s"
+            % (frame[0:4].hex(), LOAD_HEADER.hex())
+        )
+    active_end = 4 + N_LED * 3
+    for i in range(N_LED):
+        start = 4 + i * 3
+        got = frame[start : start + 3]
+        if got != expected_triple:
+            raise ValueError(
+                "triple %d is %s, expected %s"
+                % (i, got.hex(), expected_triple.hex())
+            )
+    if any(b != 0 for b in frame[active_end:]):
+        raise ValueError("color frame padding is not all zero")
+
+
+def validate_commit_frame(frame: bytes) -> None:
+    """Abort if the commit frame is not the exact frozen shape."""
+    if len(frame) != REPORT_LEN:
+        raise ValueError(
+            "commit frame length is %d, expected %d" % (len(frame), REPORT_LEN)
+        )
+    if frame[0:16] != COMMIT_PREFIX:
+        raise ValueError(
+            "commit prefix is %s, expected %s"
+            % (frame[0:16].hex(), COMMIT_PREFIX.hex())
+        )
+    if any(b != 0 for b in frame[16:]):
+        raise ValueError("commit frame padding is not all zero")
+
+
+def build_and_validate_frames() -> tuple[bytes, bytes, bytes]:
+    """Build red, white and commit in memory and validate before any I/O."""
+    red = build_color_frame(RED_TRIPLE)
+    white = build_color_frame(WHITE_TRIPLE)
+    commit = build_commit_frame()
+    validate_color_frame(red, RED_TRIPLE)
+    validate_color_frame(white, WHITE_TRIPLE)
+    validate_commit_frame(commit)
+    return red, white, commit
+
+
+def sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+# --- Sysfs resolution (read-only, never opens /dev/hidraw) ------------------
+
+
+def _read_hid_id(uevent_path: str) -> str | None:
+    try:
+        with open(uevent_path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.rstrip("\n")
+                if line.startswith("HID_ID="):
+                    return line.split("=", 1)[1]
+    except OSError:
+        return None
+    return None
+
+
+def resolve_hidraw() -> str:
+    """Return the single /dev/hidrawN node for TARGET_HID_ID via sysfs only.
+
+    Never opens the node. Raises SystemExit on zero or multiple matches.
+    """
+    matches: list[str] = []
+    try:
+        names = sorted(os.listdir(SYSFS_HIDRAW_CLASS))
+    except OSError as exc:
+        print(
+            "error: cannot list %s: %s" % (SYSFS_HIDRAW_CLASS, exc),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
+
+    for name in names:
+        if not name.startswith("hidraw"):
+            continue
+        uevent = os.path.join(SYSFS_HIDRAW_CLASS, name, "device", "uevent")
+        hid_id = _read_hid_id(uevent)
+        if hid_id == TARGET_HID_ID:
+            matches.append(name)
+
+    if len(matches) == 0:
+        print(
+            "error: no hidraw with HID_ID=%s under %s"
+            % (TARGET_HID_ID, SYSFS_HIDRAW_CLASS),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if len(matches) > 1:
+        nodes = ", ".join(os.path.join(DEV_DIR, n) for n in matches)
+        print(
+            "error: multiple hidraw nodes match HID_ID=%s: %s"
+            % (TARGET_HID_ID, nodes),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    return os.path.join(DEV_DIR, matches[0])
+
+
+def read_and_check_descriptor(node_name: str) -> None:
+    """Read report_descriptor from sysfs and check length + Output 0x26 seq."""
+    # node_name is e.g. hidraw1; sysfs path is class/hidraw1/device/...
+    base = os.path.basename(node_name)
+    desc_path = os.path.join(
+        SYSFS_HIDRAW_CLASS, base, "device", "report_descriptor"
+    )
+    try:
+        with open(desc_path, "rb") as fh:
+            desc = fh.read()
+    except OSError as exc:
+        print(
+            "error: cannot read report descriptor at %s: %s" % (desc_path, exc),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
+
+    if len(desc) != DESCRIPTOR_LEN:
+        print(
+            "error: report descriptor length is %d, expected %d"
+            % (len(desc), DESCRIPTOR_LEN),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    if OUTPUT_26_SEQ not in desc:
+        print(
+            "error: report descriptor does not declare Output Report ID 0x26 "
+            "(missing sequence %s)" % OUTPUT_26_SEQ.hex(" "),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+def run_preflight_checks() -> tuple[str, bytes, bytes, bytes]:
+    """Shared read-only preflight. Never opens /dev/hidraw.
+
+    Returns (resolved_node, red, white, commit).
+    """
+    red, white, commit = build_and_validate_frames()
+    node = resolve_hidraw()
+    read_and_check_descriptor(node)
+    return node, red, white, commit
+
+
+# --- Commands ---------------------------------------------------------------
+
+
+def cmd_preflight() -> int:
+    """Strictly read-only preflight. Prints node and frame digests."""
+    node, red, white, commit = run_preflight_checks()
+    print("nzxt-n9-first-write-lab preflight  OK (read-only, no hidraw open)")
+    print("  resolved node (not opened): %s" % node)
+    print("  HID_ID                    : %s" % TARGET_HID_ID)
+    print("  report descriptor         : %d bytes, Output 0x26 present" % DESCRIPTOR_LEN)
+    print("  red  #FF0000 @ 7%%  sha256 : %s" % sha256_hex(red))
+    print("  white #FFFFFF @ 7%% sha256 : %s" % sha256_hex(white))
+    print("  commit (26 06)     sha256 : %s" % sha256_hex(commit))
+    print()
+    print(
+        "  note: this harness cannot check fan or pump RPM. The periodic"
+    )
+    print(
+        "  'ff 03' input report is a heartbeat with a frame counter only;"
+    )
+    print(
+        "  it carries no temperature, fan RPM, or pump telemetry. Lighting"
+    )
+    print(
+        "  success is a physical LED observation. Cooling cannot be evaluated"
+    )
+    print("  by this tool.")
+    return 0
+
+
+def _require_token(args: list[str]) -> None:
+    if len(args) != 1 or args[0] != CONFIRM_TOKEN:
+        print(
+            "error: write commands require the exact confirmation token as the"
+            " sole argument:",
+            file=sys.stderr,
+        )
+        print("  %s" % CONFIRM_TOKEN, file=sys.stderr)
+        print(
+            "This token is deliberate: it names 1E71:2023 and LIGHTING-ONLY so"
+            " an accidental run cannot open the device.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+def _write_pair(node: str, data_frame: bytes, commit: bytes) -> None:
+    """Open node O_WRONLY|O_NONBLOCK, write data, wait 3 ms, write commit.
+
+    Aborts on partial write or OSError without retry. Closes the fd always.
+    Frames must already be validated (exactly REPORT_LEN each).
+    """
+    if len(data_frame) != REPORT_LEN or len(commit) != REPORT_LEN:
+        raise ValueError("internal: frames must be %d bytes" % REPORT_LEN)
+
+    fd = -1
+    try:
+        fd = os.open(node, os.O_WRONLY | os.O_NONBLOCK)
+        n = os.write(fd, data_frame)
+        if n != REPORT_LEN:
+            print(
+                "error: partial write of data frame: wrote %d of %d bytes;"
+                " aborting without retry and without commit"
+                % (n, REPORT_LEN),
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        time.sleep(COMMIT_GAP_S)
+        n = os.write(fd, commit)
+        if n != REPORT_LEN:
+            print(
+                "error: partial write of commit frame: wrote %d of %d bytes;"
+                " aborting without retry"
+                % (n, REPORT_LEN),
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+    except SystemExit:
+        raise
+    except OSError as exc:
+        print(
+            "error: write path failed on %s: %s; aborting without retry"
+            % (node, exc),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def cmd_apply_red(args: list[str]) -> int:
+    """Apply frozen red #FF0000 at 7%, then commit. Requires confirm token."""
+    _require_token(args)
+    node, red, _white, commit = run_preflight_checks()
+    _write_pair(node, red, commit)
+    print("nzxt-n9-first-write-lab apply-red  wrote data + commit (512 + 512)")
+    print("  node : %s" % node)
+    print("  data : red #FF0000 at 7% (GRB triple 00 4a 00 x 49)")
+    print("  gap  : %.3f s" % COMMIT_GAP_S)
+    print("  commit: fixed 26 06 frame")
+    print()
+    print(
+        "  Observe the physical LEDs now. Expected: solid red, dim (7%)."
+    )
+    print(
+        "  This harness cannot evaluate cooling. 'ff 03' has no RPM or"
+    )
+    print(
+        "  temperature telemetry. Confirm fan and pump health only by"
+    )
+    print("  independent physical observation, not by this tool.")
+    return 0
+
+
+def cmd_restore_white(args: list[str]) -> int:
+    """Restore frozen white #FFFFFF at 7%, then commit. Requires token."""
+    _require_token(args)
+    node, _red, white, commit = run_preflight_checks()
+    _write_pair(node, white, commit)
+    print(
+        "nzxt-n9-first-write-lab restore-white  wrote data + commit (512 + 512)"
+    )
+    print("  node : %s" % node)
+    print("  data : white #FFFFFF at 7% (GRB triple 4a 4a 4a x 49)")
+    print("  gap  : %.3f s" % COMMIT_GAP_S)
+    print("  commit: fixed 26 06 frame")
+    print()
+    print(
+        "  Expected visual result: the white this board usually shows as"
+    )
+    print(
+        "  light cyan (CAM #FFFFFF at 7%). Observe the physical LEDs."
+    )
+    print(
+        "  This harness cannot evaluate cooling. 'ff 03' has no RPM or"
+    )
+    print("  temperature telemetry.")
+    return 0
+
+
+def usage() -> None:
+    print(
+        """\
+nzxt-n9-first-write-lab — closed laboratory harness for NZXT N9 lighting
+
+Usage:
+  nzxt-n9-first-write-lab preflight
+  nzxt-n9-first-write-lab apply-red <CONFIRM_TOKEN>
+  nzxt-n9-first-write-lab restore-white <CONFIRM_TOKEN>
+  nzxt-n9-first-write-lab --help
+
+This harness has NO generic write mode. It does not accept color, brightness,
+channel, Report ID, hidraw path, LED count, payload, or arbitrary bytes.
+
+Frozen frames (exactly 512 bytes each, built from closed constants):
+  red    #FF0000 at 7%  header 26 04 20 00, GRB triple 00 4a 00 x 49
+  white  #FFFFFF at 7%  header 26 04 20 00, GRB triple 4a 4a 4a x 49
+  commit fixed prefix   26 06 20 00 01 00 00 31 00 00 80 00 32 00 00 01
+
+CONFIRM_TOKEN (required for any write, single fixed string):
+  I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
+
+preflight is strictly read-only: resolves the hidraw via sysfs, checks the
+HID report descriptor, and validates the three frozen frames in memory. It
+never opens /dev/hidrawN.
+
+apply-red and restore-white re-run those checks, then open only the resolved
+node with O_WRONLY|O_NONBLOCK, write the data frame, wait exactly 3 ms, and
+write the commit. A partial write aborts with no retry and no further bytes.
+
+This unit must not be run against real hardware without an operator present.
+The harness cannot check fan or pump RPM: 'ff 03' is a heartbeat without
+telemetry. Lighting-only. No off frame. No other Report IDs.
+"""
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        usage()
+        return 0 if argv and argv[0] in ("-h", "--help", "help") else 1
+
+    cmd = argv[0]
+    rest = argv[1:]
+
+    if cmd == "preflight":
+        if rest:
+            print(
+                "error: preflight takes no arguments (no device path, color,"
+                " or payload accepted)",
+                file=sys.stderr,
+            )
+            return 1
+        return cmd_preflight()
+    if cmd == "apply-red":
+        return cmd_apply_red(rest)
+    if cmd == "restore-white":
+        return cmd_restore_white(rest)
+
+    print("error: unknown command %r (see --help)" % cmd, file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
