@@ -298,3 +298,27 @@ Do not run these captures concurrently. Change one visible variable per window, 
 | 6 | Direction | One arrow selection only on a single effect | Visible direction before and after |
 
 Physical appearance claims require explicit operator observation. Automated screenshots can verify CAM state only. No packet replay should be attempted from this matrix.
+
+## Protocol opcode map
+
+**Verified from PCAP and the live HID report descriptor:** across the captured CAM sessions the observed exchange between CAM and the N9 used a small set of opcodes. Each 512-byte report begins with its HID Report ID, and that Report ID together with the next byte forms the two-byte opcode shown below (for example Report ID `0x26` with `0x04` is the `26 04` lighting write). Every inbound report carried a 12-byte session or serial token right after the opcode, so the opcode plus that token form the recognizable header of each reply. The table below lists only opcodes that were actually seen in traffic (verified) plus the periodic heartbeat and the generic acknowledgment as they were observed (also verified from the captures). Report IDs that the descriptor declares but that CAM never exercised are listed separately as declared only, so they are not confused with observed behavior.
+
+Status meaning in this table:
+
+- **Verified** means the opcode and its direction were seen in at least one saved capture.
+- **Observed** means the opcode was seen but its full field semantics past the opcode itself stay uncertain.
+
+| Opcode | Direction | Meaning | Status |
+| --- | --- | --- | --- |
+| `10 02` | OUT, host to controller | Firmware information request | Verified |
+| `11 02` | IN, controller to host | Firmware information reply to `10 02` | Verified |
+| `20 03` | OUT, host to controller | Channel and accessory information request | Verified |
+| `21 03` | IN, controller to host | Channel and accessory information reply to `20 03` | Verified |
+| `26 04` | OUT, host to controller | Lighting data write | Verified |
+| `26 06` | OUT, host to controller | Lighting commit that follows a `26 04` write | Verified |
+| `ff 01` | IN, controller to host | Generic acknowledgment that echoes the recognized opcode, observed after `20 03`, after `26 04`, and after `26 06` | Verified |
+| `ff 03` | IN, controller to host | Periodic heartbeat about every 3 seconds carrying a frame counter, with no telemetry payload | Verified |
+
+**Verified from the descriptor, not observed in traffic:** the report descriptor also declares Output Report IDs `12 22 24 2a f2 fe e2 f4` and Input Report IDs `13 23 25 27 29 2b e3 f5` that CAM did not exercise in any captured session. Their existence is a descriptor fact. Their meaning is **unknown** because no capture drove them.
+
+**Unknown, and important for the cooling goal:** none of the current captures contains real temperature telemetry or fan RPM telemetry. The `ff 03` heartbeat carries only a frame counter, not sensor values, and the `Monitor Temperature` lighting effect reads its source from the host, not from a controller telemetry frame. Decoding actual temperature and RPM would require a new capture taken on CAM's Cooling page (fan curves, pump control, sensor readouts), which no session in this document exercised. Do not infer a telemetry opcode from the lighting captures, and do not send any of these opcodes to the device.
