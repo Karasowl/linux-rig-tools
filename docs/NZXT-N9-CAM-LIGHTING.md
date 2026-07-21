@@ -95,6 +95,18 @@ All rows in this table are **reported manual observations** for the tested board
 
 The conceptual relationship between several theme names and the resulting effect was unclear during this exploration. The table is an observed mapping, not a stable contract.
 
+## HID report structure and write wire format
+
+**Verified from the live HID report descriptor** (`/sys/class/hidraw/hidrawN/device/report_descriptor`, 150 bytes, read-only) and cross-checked against the D12 and D21 captures:
+
+- The controller uses **numbered HID reports**. The descriptor declares explicit Report IDs for both directions.
+- Output Report IDs include `10 12 20 22 24 26 2a f2 fe e2 f4`. Input Report IDs include `11 13 21 23 25 27 29 2b e3 f5 ff`. The descriptor declares **no Feature reports**.
+- Report Size is 8 and Report Count is 511, so each report is **511 payload bytes plus one Report ID byte, 512 bytes on the wire**.
+- The lighting write uses Report ID `0x26` (declared as Output). The captured frame that begins `26 04 20 00 ...` is already the full 512-byte on-wire buffer: the leading `0x26` is the Report ID, not a data byte.
+- This also explains why the `22` and `24` opcodes were never seen in captured traffic. They are declared Output Report IDs (`0x22`, `0x24`) that CAM did not exercise in these sessions, not missing data.
+
+This resolves the wire format only. It does not authorize any write. The bytes after the Report ID (the `04` or `06` sub-command, the channel selector, and the color or brightness data) are described in the sections below, and reproducing any of them on the device stays out of scope until a first controlled write is verified with an operator watching the physical LEDs.
+
 ## USB observations from D5 and D6
 
 **Verified from artifacts:** separate, isolated captures observed 512-byte interrupt OUT traffic followed by the same `26 06` buffer.
