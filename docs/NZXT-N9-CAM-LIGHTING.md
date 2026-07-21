@@ -272,6 +272,55 @@ The exact 0.07 candidate is refuted at input 127, while the nearby effective-mul
 
 D21 also establishes an adjacent threshold in the observed output: input 127 maps to `20`, while input 128 maps to `21` in D17 through D20. This does not establish behavior for unmeasured inputs or other brightness values.
 
+## Supervised Linux write and restoration
+
+**Harness:** the closed laboratory tool is
+`tools/nzxt-n9/bin/nzxt-n9-first-write-lab`. It only exposes `preflight`,
+`apply-red`, `restore-white`, and help. Frames are frozen (D12 red at 7%, D11
+CAM white at 7%, and the observed `26 06` commit). It is not a generic write
+API and is not installed by the packaging paths.
+
+**Verified by the operator on 2026-07-21:** the closed Linux harness resolved
+the N9 as `/dev/hidraw4` through HID_ID `0003:00001E71:00002023`, checked the
+150-byte report descriptor with Output Report ID `0x26`, and sent the frozen
+D12 red frame followed by the captured `26 06` commit. The motherboard cover
+lighting changed immediately to dim red. Radiator fan rings and RAM lighting
+retained their previous states. The operator confirmed that all fans continued
+spinning with no perceived change.
+
+The harness then sent the frozen D11 CAM `#FFFFFF` frame and the same commit.
+The motherboard zones returned immediately to their customary dim cyan. CAM
+labels this state as white, while its physical appearance on this board is
+consistently cyan. The operator confirmed that this is the customary default
+appearance and is not caused by the viewing angle or the photograph. Red is
+rendered reasonably close to the expected color. No full tower restart was
+needed.
+
+The CPU package was 66 C before the first write. Samples during the complete
+cycle ranged from 47 C to 75 C, below the 85 C abort gate. After restoration,
+the N9 remained enumerated with the expected HID identity and descriptor.
+
+A separate read-only attempt received no `ff 03` heartbeat within a five-second
+window and ended by timeout. This does not prove that heartbeat emission
+stopped, but it cannot be counted as a successful post-write heartbeat check.
+Physical restoration, USB enumeration, descriptor identity, and temperature
+were independently confirmed.
+
+This proves a physical and reversible Linux lighting write for the observed
+motherboard zones. The complete red and restore cycle was then repeated from
+the restored cyan state. The second red appeared immediately with all other
+observed behavior normal, and the second restoration returned immediately to
+the customary cyan. The second cycle began at a CPU package temperature of 49
+C, measured 50 C after red, and measured 69 C after restoration. This proves
+physical repeatability across two cycles. It does not map the 49 GRB triples to
+49 physical LEDs or individual zones.
+
+The frozen white frame uses equal component values, `4a 4a 4a`. The observed
+cyan bias therefore does not come from unequal bytes in the transmitted frame.
+LED spectral response, electrical channel calibration, the optical diffuser,
+or low-brightness channel behavior are compatible explanations, but none has
+been measured yet.
+
 ## Anomalies and open questions
 
 **Reported manual observation:** while changing effects or profiles, radiator fan lighting and possibly pump lighting stopped being visible. Only RAM and motherboard lighting remained visible.

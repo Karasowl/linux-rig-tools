@@ -3,9 +3,10 @@
 Fan, pump-header and RGB control for the USB controller embedded in
 **NZXT N9 motherboards** (first target: N9 Z890).
 
-**Status: reverse engineering. No working code yet.** This device is why
-your radiator fans, pump header and board RGB can only be configured from the
-BIOS or from NZXT CAM on Windows.
+**Status: reverse engineering.** Read-only helpers and a closed lighting lab
+harness exist. Fan duty, pump control, and general RGB APIs are not ready.
+This device is why your radiator fans, pump header and board RGB can only be
+configured from the BIOS or from NZXT CAM on Windows.
 
 ## CAM lighting observations
 
@@ -115,9 +116,8 @@ Requires `python3` (>=3.10). No `hidapi` dependency.
 `nzxt-n9 encode` builds, in memory, the 512-byte `Fixed` single-color lighting
 frame for a color and brightness and prints it as hex. It is a decoding aid, a
 way to check our model against captures. **It never opens `/dev/hidraw` and
-never sends anything.** Writing any of these bytes to the controller stays out
-of scope until a first controlled write is verified with an operator watching
-the physical LEDs.
+never sends anything.** The first reversible Linux lighting write used the
+closed lab harness below, not this generic encoder.
 
 ```
 nzxt-n9 encode ff0000 7            # red at 7%, prints the load frame in hex
@@ -145,6 +145,30 @@ nine real captures (white, red, blue, green, magenta, `#804020`, `#408020`,
 `k` linearly from the 7% anchor. That `k(b)` is a model, not anchored point by
 point, so a predicted byte can differ from CAM by one level at some
 brightnesses. Treat non-7 output as a hypothesis, not a measurement.
+
+## First-write lab harness (closed, not installed)
+
+`bin/nzxt-n9-first-write-lab` is a **laboratory harness**, not a product CLI
+and not wired into installers. It was used for the first reversible Linux
+lighting write on the reference N9 Z890 (CAM Fixed, Channel 6, 7%). It only
+accepts four surfaces:
+
+```
+nzxt-n9-first-write-lab preflight
+nzxt-n9-first-write-lab apply-red I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
+nzxt-n9-first-write-lab restore-white I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
+nzxt-n9-first-write-lab --help
+```
+
+There is no color, brightness, channel, Report ID, hidraw path, LED count, or
+payload argument. Frames are frozen: D12 red `#FF0000` at 7%, D11 CAM
+`#FFFFFF` at 7% (visually dim cyan on this board), and the fixed `26 06`
+commit. Writes are a pair of exact 512-byte reports with a 3 ms gap. The
+device is resolved by HID_ID `0003:00001E71:00002023`, descriptor checks, and
+major:minor, with a second bind after open and before any write.
+
+Offline unit tests live in `tests/test_nzxt_n9_first_write_lab.py` and never
+open real hardware. Do not treat this harness as a generic lighting API.
 
 ## Plan
 

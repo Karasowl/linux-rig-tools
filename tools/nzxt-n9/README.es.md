@@ -3,10 +3,11 @@
 Control de ventiladores, header de bomba y RGB para el controlador USB
 embebido en las **placas base NZXT N9** (primer objetivo: N9 Z890).
 
-**Estado: ingeniería inversa. Todavía no hay código funcional.** Este
-dispositivo es la razón de que los ventiladores del radiador, el header de
-bomba y el RGB de la placa solo puedan configurarse desde la BIOS o desde
-NZXT CAM en Windows.
+**Estado: ingeniería inversa.** Existen ayudantes de solo lectura y un arnés
+cerrado de laboratorio para iluminación. El control de duty de ventiladores,
+bomba y una API RGB general todavía no están listos. Este dispositivo es la
+razón de que los ventiladores del radiador, el header de bomba y el RGB de la
+placa solo puedan configurarse desde la BIOS o desde NZXT CAM en Windows.
 
 ## Observaciones de iluminación de CAM
 
@@ -125,9 +126,9 @@ Requiere `python3` (>=3.10). Sin dependencia de `hidapi`.
 `nzxt-n9 encode` construye en memoria la trama de iluminación de 512 bytes del
 modo `Fixed` de un color para un color y un brillo, y la imprime en hex. Es una
 ayuda de decodificación, una forma de contrastar nuestro modelo contra las
-capturas. **Nunca abre `/dev/hidraw` y nunca envía nada.** Escribir cualquiera
-de estos bytes al controlador queda fuera de alcance hasta verificar una primera
-escritura controlada con un operador mirando los LED físicos.
+capturas. **Nunca abre `/dev/hidraw` y nunca envía nada.** La primera
+escritura física reversible desde Linux usó el arnés de laboratorio cerrado
+descrito más abajo, no este codificador genérico.
 
 ```
 nzxt-n9 encode ff0000 7            # rojo al 7%, imprime la trama de carga en hex
@@ -156,6 +157,32 @@ codificador escala `k` linealmente desde el ancla del 7%. Ese `k(b)` es un
 modelo, no anclado punto por punto, así que un byte predicho puede diferir de
 CAM en un nivel a ciertos brillos. Trata la salida fuera del 7% como una
 hipótesis, no como una medición.
+
+## Arnés de laboratorio de primera escritura (cerrado, no instalado)
+
+`bin/nzxt-n9-first-write-lab` es un **arnés de laboratorio**, no una CLI de
+producto y no está cableado en los instaladores. Se usó para la primera
+escritura reversible de iluminación desde Linux en la N9 Z890 de referencia
+(CAM Fixed, Canal 6, 7%). Solo acepta cuatro superficies:
+
+```
+nzxt-n9-first-write-lab preflight
+nzxt-n9-first-write-lab apply-red I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
+nzxt-n9-first-write-lab restore-white I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
+nzxt-n9-first-write-lab --help
+```
+
+No hay argumentos de color, brillo, canal, Report ID, ruta hidraw, número de
+LED ni payload. Las tramas están congeladas: rojo D12 `#FF0000` al 7%, blanco
+CAM D11 `#FFFFFF` al 7% (cian tenue en esta placa) y el commit fijo `26 06`.
+Las escrituras son un par de reportes exactos de 512 bytes con una pausa de
+3 ms. El dispositivo se resuelve por HID_ID `0003:00001E71:00002023`,
+descriptor y major:minor, con una segunda vinculación después de abrir y
+antes de escribir.
+
+Las pruebas offline viven en `tests/test_nzxt_n9_first_write_lab.py` y nunca
+abren hardware real. No trates este arnés como una API genérica de
+iluminación.
 
 ## Plan
 
