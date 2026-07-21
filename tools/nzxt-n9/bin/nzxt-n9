@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# nzxt-n9 — read-only helper for the USB controller embedded in NZXT N9
+# motherboards (first target: N9 Z890, USB 1e71:2023).
+#
+# READ-ONLY BY DESIGN. This tool never writes to the device: no HID output
+# reports, no feature reports, no ioctl that sends data. It only locates the
+# hidraw node and reads a few input reports (O_RDONLY). A bad HID write can
+# hang the controller, so writing stays out until the protocol is proven from
+# captures. See tools/nzxt-n9/README.md.
+# Part of https://github.com/Karasowl/linux-rig-tools
+set -u
+
+VERSION="0.1.0-wip"
+
+# --- USB identity of the target controller -------------------------------
+VID="1E71"   # NZXT, Inc.
+PID="2023"   # NZXT N9 Z890
+
+usage() {
+cat <<'EOF'
+nzxt-n9 — read-only helper for NZXT N9 embedded controller (1e71:2023)
+
+Usage:
+  nzxt-n9 status        Read a few 'ff 03' input reports and decode them.
+  nzxt-n9 find          Print the hidraw node for 1e71:2023 and exit.
+  nzxt-n9 --version
+  nzxt-n9 -h | --help
+
+'status' opens the device READ-ONLY and reads its periodic 512-byte 'ff 03'
+report. Per reverse engineering (U1), 'ff 03' is a heartbeat/keepalive frame:
+it carries NO live CPU/GPU temp, fan RPM or pump telemetry on hid-generic —
+only a serial echo and a per-frame counter. This tool never writes to the
+device. Reading /dev/hidrawN usually needs root: run with sudo, or add a udev
+rule granting your user read access.
+EOF
+}
+
+# --- Locate the hidraw node for VID:PID via sysfs (no writes) ------------
+find_hidraw() {
+  local h node hid_id vend prod
+  for h in /sys/class/hidraw/hidraw*; do
+    [[ -e "$h" ]] || continue
+    hid_id=$(grep -h '^HID_ID=' "$h/device/uevent" 2>/dev/null | cut -d= -f2-)
+    # HID_ID looks like: 0003:00001E71:00002023
+    vend=${hid_id#*:}; vend=${vend%%:*}          # 00001E71
+    prod=${hid_id##*:}                            # 00002023
+    if [[ "${vend: -4}" == "$VID" && "${prod: -4}" == "$PID" ]]; then
+      node="/dev/${h##*/}"
+      printf '%s\n' "$node"
+      return 0
+    fi
+  done
+  return 1
+}
+
+cmd_find() {
+  local node
+  if node=$(find_hidraw); then
+    echo "$node"
+    return 0
+  fi
+  echo "error: no NZXT N9 controller ($VID:$PID) found among /dev/hidraw*" >&2
+  echo "hint: is the board present? check 'lsusb | grep -i $VID'" >&2
+  return 1
+}
+
+cmd_status() {
+  local node
+  if ! node=$(find_hidraw); then
+    echo "error: no NZXT N9 controller ($VID:$PID) found among /dev/hidraw*" >&2
+    echo "hint: check 'lsusb | grep -i $VID' — the board may be absent or bound elsewhere." >&2
+    return 1
+  fi
+  if [[ ! -r "$node" ]]; then
+    echo "error: $node is not readable by $(id -un)." >&2
+    echo "Reading HID input reports needs permission. Options:" >&2
+    echo "  1) run this command with sudo:   sudo nzxt-n9 status" >&2
+    echo "  2) or add a udev rule granting your user read access, e.g.:" >&2
+    echo "       SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"1e71\", ATTRS{idProduct}==\"2023\", MODE=\"0440\", TAG+=\"uaccess\"" >&2
+    echo "     save as /etc/udev/rules.d/70-nzxt-n9.rules, then:" >&2
+    echo "       sudo udevadm control --reload && sudo udevadm trigger" >&2
+    return 1
+  fi
+
+  command -v python3 >/dev/null 2>&1 || {
+    echo "error: python3 (>=3.10) is required for 'status'" >&2
+    return 1
+  }
+
+  # Decoding runs in python: os.open O_RDONLY only, os.read only, os.close.
+  # No os.write, no fcntl.ioctl, no HID output/feature reports anywhere.
+  NZXT_N9_NODE="$node" python3 - "$@" <<'PYEOF'
+import os, select, sys, time
+
+node = os.environ["NZXT_N9_NODE"]
+
+FRAMES_WANTED = 3       # 'ff 03' frames to collect
+TIMEOUT_S     = 15.0    # give up after this (frames arrive every ~3s)
+REPORT_LEN    = 512
+
+def decode(buf):
+    b = bytearray(buf)
+    n = len(b)
+    fields = {}
+    fields["length"]        = n
+    fields["prefix"]        = "%02x %02x" % (b[0], b[1]) if n >= 2 else ""
+    fields["serial_echo"]   = b[2:14].hex() if n >= 14 else ""
+    if n >= 16:
+        fields["frame_counter"] = b[14] | (b[15] << 8)   # uint16 little-endian
+    fields["flag_byte16"]   = ("0x%02x" % b[16]) if n >= 17 else ""
+    # Verify the tail is zero padding (offsets 17..end).
+    tail_nonzero = sum(1 for x in b[17:] if x != 0) if n > 17 else 0
+    fields["padding_nonzero_bytes"] = tail_nonzero
+    return fields
+
+def main():
+    # READ-ONLY: no O_WRONLY/O_RDWR. O_NONBLOCK so a silent device can't hang.
+    try:
+        fd = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
+    except PermissionError:
+        print("error: permission denied opening %s (try sudo)" % node, file=sys.stderr)
+        return 1
+    except OSError as e:
+        print("error: cannot open %s: %s" % (node, e), file=sys.stderr)
+        return 1
+
+    frames = []
+    deadline = time.monotonic() + TIMEOUT_S
+    try:
+        while len(frames) < FRAMES_WANTED and time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            r, _, _ = select.select([fd], [], [], max(0.0, min(1.0, remaining)))
+            if not r:
+                continue
+            try:
+                data = os.read(fd, REPORT_LEN + 1)
+            except BlockingIOError:
+                continue
+            except OSError as e:
+                print("error: read failed on %s: %s" % (node, e), file=sys.stderr)
+                break
+            if not data:
+                continue
+            # 'ff 03' family only; ignore anything else the endpoint emits.
+            if len(data) >= 2 and data[0] == 0xff and data[1] == 0x03:
+                frames.append(bytes(data))
+    finally:
+        os.close(fd)
+
+    if not frames:
+        print("no 'ff 03' report received within %.0fs." % TIMEOUT_S)
+        print("The device may be idle on this interface. This tool only reads;")
+        print("live sensor telemetry is host-solicited and not decoded yet.")
+        return 2
+
+    print("NZXT N9 (1e71:2023) — read-only status")
+    print("  device node : %s (opened O_RDONLY)" % node)
+    print("  report      : 'ff 03' heartbeat, %d frame(s) read" % len(frames))
+    print()
+
+    first = decode(frames[0])
+    print("  report length     : %d bytes" % first["length"])
+    print("  prefix (0..1)     : %s   (ff 03 = heartbeat family)" % first["prefix"])
+    print("  serial echo (2..13): %s" % first["serial_echo"])
+    if first["padding_nonzero_bytes"] == 0:
+        print("  padding (17..end) : all zero (as expected)")
+    else:
+        print("  padding (17..end) : %d non-zero byte(s) — UNEXPECTED, worth a capture"
+              % first["padding_nonzero_bytes"])
+    if first.get("flag_byte16"):
+        print("  flag (byte 16)    : %s   (unknown, low confidence)" % first["flag_byte16"])
+
+    print()
+    print("  frame counter (uint16 LE, offsets 14..15):")
+    prev = None
+    for i, fr in enumerate(frames):
+        d = decode(fr)
+        c = d.get("frame_counter")
+        step = "" if prev is None else "  (+%d)" % ((c - prev) & 0xffff)
+        print("    frame %d: %d%s" % (i, c, step))
+        prev = c
+
+    print()
+    print("  note: 'ff 03' is a keepalive. It carries NO live CPU/GPU temp,")
+    print("        fan RPM or pump data (verified in U1). The counter is not a")
+    print("        sensor. Live telemetry needs a host-solicited request that is")
+    print("        not implemented — and would require a device write, which this")
+    print("        read-only tool deliberately does not do.")
+    return 0
+
+sys.exit(main())
+PYEOF
+}
+
+case "${1:-}" in
+  status)      shift; cmd_status "$@" ;;
+  find)        cmd_find ;;
+  --version)   echo "nzxt-n9 $VERSION" ;;
+  -h|--help|"") usage ;;
+  *)           usage; exit 1 ;;
+esac
