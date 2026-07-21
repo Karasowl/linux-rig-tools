@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import sys
 import time
 from typing import Final
@@ -217,6 +218,114 @@ def read_and_check_descriptor(node_name: str) -> None:
         raise SystemExit(1)
 
 
+def _read_sysfs_dev_numbers(hidraw_name: str) -> tuple[int, int]:
+    """Read major:minor from sysfs class/hidrawN/dev. Aborts on bad format."""
+    base = os.path.basename(hidraw_name)
+    dev_path = os.path.join(SYSFS_HIDRAW_CLASS, base, "dev")
+    try:
+        with open(dev_path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read().strip()
+    except OSError as exc:
+        print(
+            "error: cannot read sysfs dev at %s: %s" % (dev_path, exc),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
+
+    parts = text.split(":")
+    if len(parts) != 2:
+        print(
+            "error: sysfs dev at %s is %r, expected major:minor"
+            % (dev_path, text),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    try:
+        major = int(parts[0])
+        minor = int(parts[1])
+    except ValueError:
+        print(
+            "error: sysfs dev at %s is %r, expected integer major:minor"
+            % (dev_path, text),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    return major, minor
+
+
+def verify_open_fd_matches_resolved(fd: int, node: str) -> None:
+    """Bind the open fd to the previously resolved hidraw before any write.
+
+    After os.open(node), the name /dev/hidrawN could have been reassigned.
+    Re-check character device identity (st_rdev vs sysfs dev), HID_ID, and
+    report descriptor before the first os.write.
+    """
+    try:
+        st = os.fstat(fd)
+    except OSError as exc:
+        print(
+            "error: fstat failed on open fd for %s: %s" % (node, exc),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
+
+    if not stat.S_ISCHR(st.st_mode):
+        print(
+            "error: open fd for %s is not a character device (mode=0o%o);"
+            " aborting without write" % (node, st.st_mode),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    fd_major = os.major(st.st_rdev)
+    fd_minor = os.minor(st.st_rdev)
+    sys_major, sys_minor = _read_sysfs_dev_numbers(node)
+    if fd_major != sys_major or fd_minor != sys_minor:
+        print(
+            "error: open fd rdev %d:%d does not match sysfs %s/dev %d:%d;"
+            " aborting without write"
+            % (
+                fd_major,
+                fd_minor,
+                os.path.basename(node),
+                sys_major,
+                sys_minor,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    base = os.path.basename(node)
+    uevent = os.path.join(SYSFS_HIDRAW_CLASS, base, "device", "uevent")
+    hid_id = _read_hid_id(uevent)
+    if hid_id != TARGET_HID_ID:
+        print(
+            "error: after open, HID_ID at %s is %r, expected %s;"
+            " aborting without write" % (uevent, hid_id, TARGET_HID_ID),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    # Re-read descriptor so a swap after resolve still fails closed.
+    read_and_check_descriptor(node)
+
+
+def _open_flags() -> int:
+    """O_WRONLY|O_NONBLOCK plus O_CLOEXEC/O_NOFOLLOW when the platform has them.
+
+    O_NONBLOCK is NOT a write-timeout guarantee for hidraw. A stuck controller
+    can still hang a write. The external procedure keeps a physical power-cycle
+    / board reset as last-resort recovery. O_CLOEXEC avoids leaking the fd
+    across exec. O_NOFOLLOW refuses opening through a symlink.
+    """
+    flags = os.O_WRONLY | os.O_NONBLOCK
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return flags
+
+
 def run_preflight_checks() -> tuple[str, bytes, bytes, bytes]:
     """Shared read-only preflight. Never opens /dev/hidraw.
 
@@ -275,9 +384,16 @@ def _require_token(args: list[str]) -> None:
 
 
 def _write_pair(node: str, data_frame: bytes, commit: bytes) -> None:
-    """Open node O_WRONLY|O_NONBLOCK, write data, wait 3 ms, write commit.
+    """Open node, re-bind fd to resolved device, write data, gap, commit.
 
-    Aborts on partial write or OSError without retry. Closes the fd always.
+    Open flags: O_WRONLY|O_NONBLOCK, plus O_CLOEXEC and O_NOFOLLOW when
+    available. O_NONBLOCK is not a hidraw write timeout. Physical reset remains
+    the external last-resort recovery if a write hangs.
+
+    After open and before the first os.write, verify_open_fd_matches_resolved
+    ties the fd to the sysfs-validated hidraw (char device, major:minor,
+    HID_ID, descriptor). Any failure closes the fd and aborts with zero bytes
+    written. Partial writes abort without retry. Closes the fd always.
     Frames must already be validated (exactly REPORT_LEN each).
     """
     if len(data_frame) != REPORT_LEN or len(commit) != REPORT_LEN:
@@ -285,7 +401,9 @@ def _write_pair(node: str, data_frame: bytes, commit: bytes) -> None:
 
     fd = -1
     try:
-        fd = os.open(node, os.O_WRONLY | os.O_NONBLOCK)
+        fd = os.open(node, _open_flags())
+        # Bind open fd to the resolved node before any write (race mitigation).
+        verify_open_fd_matches_resolved(fd, node)
         n = os.write(fd, data_frame)
         if n != REPORT_LEN:
             print(
@@ -399,8 +517,11 @@ HID report descriptor, and validates the three frozen frames in memory. It
 never opens /dev/hidrawN.
 
 apply-red and restore-white re-run those checks, then open only the resolved
-node with O_WRONLY|O_NONBLOCK, write the data frame, wait exactly 3 ms, and
-write the commit. A partial write aborts with no retry and no further bytes.
+node with O_WRONLY|O_NONBLOCK (plus O_CLOEXEC/O_NOFOLLOW when available),
+re-bind the open fd to the sysfs identity (char device, major:minor, HID_ID,
+descriptor), write the data frame, wait exactly 3 ms, and write the commit.
+A partial write or post-open mismatch aborts with no retry and no further
+bytes. O_NONBLOCK is not a write timeout for hidraw.
 
 This unit must not be run against real hardware without an operator present.
 The harness cannot check fan or pump RPM: 'ff 03' is a heartbeat without

@@ -2,7 +2,7 @@
 """Offline unit tests for nzxt-n9-first-write-lab.
 
 No real hardware. Sysfs and device nodes are temporary directories.
-os.open / os.write / os.close / time.sleep are mocked for write paths.
+os.open / os.write / os.close / os.fstat / time.sleep are mocked for write paths.
 """
 
 from __future__ import annotations
@@ -11,8 +11,10 @@ import importlib.machinery
 import importlib.util
 import io
 import os
+import stat
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -31,6 +33,11 @@ lab = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(lab)
 
 
+# Default fake hidraw major:minor (offline only, not a real kernel mapping).
+_DEFAULT_MAJOR = 245
+_DEFAULT_MINOR = 1
+
+
 # Minimal 150-byte HID report descriptor containing Output Report ID 0x26
 # sequence 85 26 09 01 91 82 (as observed on the N9 Z890).
 def _make_descriptor(valid: bool = True) -> bytes:
@@ -43,6 +50,33 @@ def _make_descriptor(valid: bool = True) -> bytes:
     return bytes(body)
 
 
+def _expected_open_flags() -> int:
+    flags = os.O_WRONLY | os.O_NONBLOCK
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return flags
+
+
+def _make_char_stat(
+    major: int = _DEFAULT_MAJOR, minor: int = _DEFAULT_MINOR
+) -> types.SimpleNamespace:
+    """Build a minimal os.stat_result-like object for a character device."""
+    return types.SimpleNamespace(
+        st_mode=stat.S_IFCHR | 0o600,
+        st_rdev=os.makedev(major, minor),
+    )
+
+
+def _make_non_char_stat() -> types.SimpleNamespace:
+    """Build a stat-like object that is NOT a character device (regular file)."""
+    return types.SimpleNamespace(
+        st_mode=stat.S_IFREG | 0o644,
+        st_rdev=0,
+    )
+
+
 def _install_fake_sysfs(
     root: Path,
     *,
@@ -50,8 +84,13 @@ def _install_fake_sysfs(
     hid_ids: dict[str, str] | None = None,
     descriptor: bytes | None = None,
     desc_by_name: dict[str, bytes] | None = None,
+    dev_numbers: dict[str, tuple[int, int]] | None = None,
 ) -> Path:
-    """Create a fake /sys/class/hidraw tree under root. Returns class dir."""
+    """Create a fake /sys/class/hidraw tree under root. Returns class dir.
+
+    Each hidrawN gets device/uevent, device/report_descriptor, and a `dev`
+    file with major:minor (required for post-open fd binding).
+    """
     class_dir = root / "class" / "hidraw"
     class_dir.mkdir(parents=True)
     if names is None:
@@ -61,8 +100,9 @@ def _install_fake_sysfs(
     if descriptor is None:
         descriptor = _make_descriptor(valid=True)
 
-    for name in names:
-        dev = class_dir / name / "device"
+    for idx, name in enumerate(names):
+        node_dir = class_dir / name
+        dev = node_dir / "device"
         dev.mkdir(parents=True)
         hid_id = hid_ids.get(name, "0003:00000000:00000000")
         (dev / "uevent").write_text(
@@ -75,6 +115,11 @@ def _install_fake_sysfs(
             else descriptor
         )
         (dev / "report_descriptor").write_bytes(desc)
+        if dev_numbers and name in dev_numbers:
+            major, minor = dev_numbers[name]
+        else:
+            major, minor = _DEFAULT_MAJOR, _DEFAULT_MINOR + idx
+        (node_dir / "dev").write_text("%d:%d\n" % (major, minor), encoding="utf-8")
     return class_dir
 
 
@@ -223,6 +268,13 @@ class WritePathTests(unittest.TestCase):
             DEV_DIR=str(dev_dir),
         )
 
+    def _matching_fstat(self, expected_fd: int):
+        def fake_fstat(fd):
+            self.assertEqual(fd, expected_fd)
+            return _make_char_stat()
+
+        return fake_fstat
+
     def test_wrong_token_fails_before_open(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -264,7 +316,7 @@ class WritePathTests(unittest.TestCase):
 
             def fake_open(path, flags, *a, **k):
                 self.assertEqual(str(path), expected_node)
-                self.assertEqual(flags, os.O_WRONLY | os.O_NONBLOCK)
+                self.assertEqual(flags, _expected_open_flags())
                 state["open_flags"] = flags
                 return state["fd"]
 
@@ -283,19 +335,22 @@ class WritePathTests(unittest.TestCase):
             with self._patch_env(class_dir, dev_dir):
                 with mock.patch.object(lab.os, "open", side_effect=fake_open):
                     with mock.patch.object(
-                        lab.os, "write", side_effect=fake_write
+                        lab.os, "fstat", side_effect=self._matching_fstat(17)
                     ):
                         with mock.patch.object(
-                            lab.os, "close", side_effect=fake_close
+                            lab.os, "write", side_effect=fake_write
                         ):
                             with mock.patch.object(
-                                lab.time, "sleep", side_effect=fake_sleep
+                                lab.os, "close", side_effect=fake_close
                             ):
-                                buf = io.StringIO()
-                                with mock.patch.object(sys, "stdout", buf):
-                                    rc = lab.cmd_apply_red(
-                                        [lab.CONFIRM_TOKEN]
-                                    )
+                                with mock.patch.object(
+                                    lab.time, "sleep", side_effect=fake_sleep
+                                ):
+                                    buf = io.StringIO()
+                                    with mock.patch.object(sys, "stdout", buf):
+                                        rc = lab.cmd_apply_red(
+                                            [lab.CONFIRM_TOKEN]
+                                        )
             self.assertEqual(rc, 0)
             self.assertTrue(state["closed"])
             self.assertEqual(len(writes), 2)
@@ -322,7 +377,7 @@ class WritePathTests(unittest.TestCase):
 
             def fake_open(path, flags, *a, **k):
                 self.assertEqual(str(path), expected_node)
-                self.assertEqual(flags, os.O_WRONLY | os.O_NONBLOCK)
+                self.assertEqual(flags, _expected_open_flags())
                 return state["fd"]
 
             def fake_write(fd, data):
@@ -338,19 +393,22 @@ class WritePathTests(unittest.TestCase):
             with self._patch_env(class_dir, dev_dir):
                 with mock.patch.object(lab.os, "open", side_effect=fake_open):
                     with mock.patch.object(
-                        lab.os, "write", side_effect=fake_write
+                        lab.os, "fstat", side_effect=self._matching_fstat(9)
                     ):
                         with mock.patch.object(
-                            lab.os, "close", side_effect=fake_close
+                            lab.os, "write", side_effect=fake_write
                         ):
                             with mock.patch.object(
-                                lab.time, "sleep", side_effect=fake_sleep
+                                lab.os, "close", side_effect=fake_close
                             ):
-                                buf = io.StringIO()
-                                with mock.patch.object(sys, "stdout", buf):
-                                    rc = lab.cmd_restore_white(
-                                        [lab.CONFIRM_TOKEN]
-                                    )
+                                with mock.patch.object(
+                                    lab.time, "sleep", side_effect=fake_sleep
+                                ):
+                                    buf = io.StringIO()
+                                    with mock.patch.object(sys, "stdout", buf):
+                                        rc = lab.cmd_restore_white(
+                                            [lab.CONFIRM_TOKEN]
+                                        )
             self.assertEqual(rc, 0)
             self.assertTrue(state["closed"])
             self.assertEqual(len(writes), 2)
@@ -388,16 +446,19 @@ class WritePathTests(unittest.TestCase):
             with self._patch_env(class_dir, dev_dir):
                 with mock.patch.object(lab.os, "open", side_effect=fake_open):
                     with mock.patch.object(
-                        lab.os, "write", side_effect=fake_write
+                        lab.os, "fstat", side_effect=self._matching_fstat(3)
                     ):
                         with mock.patch.object(
-                            lab.os, "close", side_effect=fake_close
+                            lab.os, "write", side_effect=fake_write
                         ):
                             with mock.patch.object(
-                                lab.time, "sleep", side_effect=fake_sleep
+                                lab.os, "close", side_effect=fake_close
                             ):
-                                with self.assertRaises(SystemExit) as ctx:
-                                    lab.cmd_apply_red([lab.CONFIRM_TOKEN])
+                                with mock.patch.object(
+                                    lab.time, "sleep", side_effect=fake_sleep
+                                ):
+                                    with self.assertRaises(SystemExit) as ctx:
+                                        lab.cmd_apply_red([lab.CONFIRM_TOKEN])
             self.assertEqual(ctx.exception.code, 1)
             self.assertEqual(len(writes), 1)  # only first write attempted
             self.assertEqual(sleeps, [])  # no gap, no commit
@@ -429,20 +490,307 @@ class WritePathTests(unittest.TestCase):
             with self._patch_env(class_dir, dev_dir):
                 with mock.patch.object(lab.os, "open", side_effect=fake_open):
                     with mock.patch.object(
-                        lab.os, "write", side_effect=fake_write
+                        lab.os, "fstat", side_effect=self._matching_fstat(4)
                     ):
                         with mock.patch.object(
-                            lab.os, "close", side_effect=fake_close
+                            lab.os, "write", side_effect=fake_write
                         ):
-                            with mock.patch.object(lab.time, "sleep"):
-                                with self.assertRaises(SystemExit) as ctx:
-                                    lab.cmd_restore_white(
-                                        [lab.CONFIRM_TOKEN]
-                                    )
+                            with mock.patch.object(
+                                lab.os, "close", side_effect=fake_close
+                            ):
+                                with mock.patch.object(lab.time, "sleep"):
+                                    with self.assertRaises(SystemExit) as ctx:
+                                        lab.cmd_restore_white(
+                                            [lab.CONFIRM_TOKEN]
+                                        )
             self.assertEqual(ctx.exception.code, 1)
             self.assertEqual(write_sizes, [512, 512])  # two attempts only
             self.assertEqual(state["n"], 2)  # no third write / retry
             self.assertTrue(state["closed"])
+
+
+class FdBindingTests(unittest.TestCase):
+    """Post-open fd ↔ sysfs binding before the first os.write."""
+
+    def _patch_env(self, class_dir: Path, dev_dir: Path):
+        return mock.patch.multiple(
+            lab,
+            SYSFS_HIDRAW_CLASS=str(class_dir),
+            DEV_DIR=str(dev_dir),
+        )
+
+    def test_char_fd_matching_major_minor_allows_both_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            class_dir = _install_fake_sysfs(
+                root,
+                dev_numbers={"hidraw1": (_DEFAULT_MAJOR, _DEFAULT_MINOR)},
+            )
+            dev_dir = root / "dev"
+            dev_dir.mkdir()
+            red, _white, commit = lab.build_and_validate_frames()
+
+            writes: list[bytes] = []
+            state = {"fd": 21, "closed": False}
+
+            def fake_open(path, flags, *a, **k):
+                return state["fd"]
+
+            def fake_fstat(fd):
+                self.assertEqual(fd, state["fd"])
+                return _make_char_stat(_DEFAULT_MAJOR, _DEFAULT_MINOR)
+
+            def fake_write(fd, data):
+                writes.append(bytes(data))
+                return len(data)
+
+            def fake_close(fd):
+                state["closed"] = True
+
+            with self._patch_env(class_dir, dev_dir):
+                with mock.patch.object(lab.os, "open", side_effect=fake_open):
+                    with mock.patch.object(
+                        lab.os, "fstat", side_effect=fake_fstat
+                    ):
+                        with mock.patch.object(
+                            lab.os, "write", side_effect=fake_write
+                        ):
+                            with mock.patch.object(
+                                lab.os, "close", side_effect=fake_close
+                            ):
+                                with mock.patch.object(lab.time, "sleep"):
+                                    rc = lab.cmd_apply_red([lab.CONFIRM_TOKEN])
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(writes), 2)
+            self.assertEqual(writes[0], red)
+            self.assertEqual(writes[1], commit)
+            self.assertTrue(state["closed"])
+
+    def test_non_char_fd_aborts_with_zero_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            class_dir = _install_fake_sysfs(root)
+            dev_dir = root / "dev"
+            dev_dir.mkdir()
+
+            writes: list[bytes] = []
+            state = {"fd": 22, "closed": False}
+
+            def fake_open(path, flags, *a, **k):
+                return state["fd"]
+
+            def fake_fstat(fd):
+                return _make_non_char_stat()
+
+            def fake_write(fd, data):
+                writes.append(bytes(data))
+                return len(data)
+
+            def fake_close(fd):
+                state["closed"] = True
+
+            with self._patch_env(class_dir, dev_dir):
+                with mock.patch.object(lab.os, "open", side_effect=fake_open):
+                    with mock.patch.object(
+                        lab.os, "fstat", side_effect=fake_fstat
+                    ):
+                        with mock.patch.object(
+                            lab.os, "write", side_effect=fake_write
+                        ):
+                            with mock.patch.object(
+                                lab.os, "close", side_effect=fake_close
+                            ):
+                                with mock.patch.object(lab.time, "sleep"):
+                                    with self.assertRaises(SystemExit) as ctx:
+                                        lab.cmd_apply_red([lab.CONFIRM_TOKEN])
+            self.assertEqual(ctx.exception.code, 1)
+            self.assertEqual(writes, [])
+            self.assertTrue(state["closed"])
+
+    def test_mismatched_major_minor_aborts_with_zero_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Sysfs says 245:1, fstat will claim 245:99.
+            class_dir = _install_fake_sysfs(
+                root,
+                dev_numbers={"hidraw1": (_DEFAULT_MAJOR, _DEFAULT_MINOR)},
+            )
+            dev_dir = root / "dev"
+            dev_dir.mkdir()
+
+            writes: list[bytes] = []
+            state = {"fd": 23, "closed": False}
+
+            def fake_open(path, flags, *a, **k):
+                return state["fd"]
+
+            def fake_fstat(fd):
+                return _make_char_stat(_DEFAULT_MAJOR, 99)
+
+            def fake_write(fd, data):
+                writes.append(bytes(data))
+                return len(data)
+
+            def fake_close(fd):
+                state["closed"] = True
+
+            with self._patch_env(class_dir, dev_dir):
+                with mock.patch.object(lab.os, "open", side_effect=fake_open):
+                    with mock.patch.object(
+                        lab.os, "fstat", side_effect=fake_fstat
+                    ):
+                        with mock.patch.object(
+                            lab.os, "write", side_effect=fake_write
+                        ):
+                            with mock.patch.object(
+                                lab.os, "close", side_effect=fake_close
+                            ):
+                                with mock.patch.object(lab.time, "sleep"):
+                                    with self.assertRaises(SystemExit) as ctx:
+                                        lab.cmd_restore_white(
+                                            [lab.CONFIRM_TOKEN]
+                                        )
+            self.assertEqual(ctx.exception.code, 1)
+            self.assertEqual(writes, [])
+            self.assertTrue(state["closed"])
+
+    def test_hid_id_changed_after_open_aborts_with_zero_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            class_dir = _install_fake_sysfs(root)
+            dev_dir = root / "dev"
+            dev_dir.mkdir()
+            uevent = class_dir / "hidraw1" / "device" / "uevent"
+
+            writes: list[bytes] = []
+            state = {"fd": 24, "closed": False}
+
+            def fake_open(path, flags, *a, **k):
+                # Race: HID_ID changes after open, before write.
+                uevent.write_text(
+                    "DRIVER=hid-generic\n"
+                    "HID_ID=0003:00009999:00008888\n"
+                    "HID_NAME=OTHER\n",
+                    encoding="utf-8",
+                )
+                return state["fd"]
+
+            def fake_fstat(fd):
+                return _make_char_stat()
+
+            def fake_write(fd, data):
+                writes.append(bytes(data))
+                return len(data)
+
+            def fake_close(fd):
+                state["closed"] = True
+
+            with self._patch_env(class_dir, dev_dir):
+                with mock.patch.object(lab.os, "open", side_effect=fake_open):
+                    with mock.patch.object(
+                        lab.os, "fstat", side_effect=fake_fstat
+                    ):
+                        with mock.patch.object(
+                            lab.os, "write", side_effect=fake_write
+                        ):
+                            with mock.patch.object(
+                                lab.os, "close", side_effect=fake_close
+                            ):
+                                with mock.patch.object(lab.time, "sleep"):
+                                    with self.assertRaises(SystemExit) as ctx:
+                                        lab.cmd_apply_red([lab.CONFIRM_TOKEN])
+            self.assertEqual(ctx.exception.code, 1)
+            self.assertEqual(writes, [])
+            self.assertTrue(state["closed"])
+
+    def test_descriptor_changed_after_open_aborts_with_zero_writes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            class_dir = _install_fake_sysfs(root)
+            dev_dir = root / "dev"
+            dev_dir.mkdir()
+            desc_path = class_dir / "hidraw1" / "device" / "report_descriptor"
+
+            writes: list[bytes] = []
+            state = {"fd": 25, "closed": False}
+
+            def fake_open(path, flags, *a, **k):
+                # Race: descriptor mutates after open, before write.
+                desc_path.write_bytes(_make_descriptor(valid=False))
+                return state["fd"]
+
+            def fake_fstat(fd):
+                return _make_char_stat()
+
+            def fake_write(fd, data):
+                writes.append(bytes(data))
+                return len(data)
+
+            def fake_close(fd):
+                state["closed"] = True
+
+            with self._patch_env(class_dir, dev_dir):
+                with mock.patch.object(lab.os, "open", side_effect=fake_open):
+                    with mock.patch.object(
+                        lab.os, "fstat", side_effect=fake_fstat
+                    ):
+                        with mock.patch.object(
+                            lab.os, "write", side_effect=fake_write
+                        ):
+                            with mock.patch.object(
+                                lab.os, "close", side_effect=fake_close
+                            ):
+                                with mock.patch.object(lab.time, "sleep"):
+                                    with self.assertRaises(SystemExit) as ctx:
+                                        lab.cmd_apply_red([lab.CONFIRM_TOKEN])
+            self.assertEqual(ctx.exception.code, 1)
+            self.assertEqual(writes, [])
+            self.assertTrue(state["closed"])
+
+    def test_open_flags_include_nofollow_and_cloexec_when_available(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            class_dir = _install_fake_sysfs(root)
+            dev_dir = root / "dev"
+            dev_dir.mkdir()
+            seen_flags: list[int] = []
+            state = {"fd": 26}
+
+            def fake_open(path, flags, *a, **k):
+                seen_flags.append(flags)
+                return state["fd"]
+
+            def fake_fstat(fd):
+                return _make_char_stat()
+
+            def fake_write(fd, data):
+                return len(data)
+
+            with self._patch_env(class_dir, dev_dir):
+                with mock.patch.object(lab.os, "open", side_effect=fake_open):
+                    with mock.patch.object(
+                        lab.os, "fstat", side_effect=fake_fstat
+                    ):
+                        with mock.patch.object(
+                            lab.os, "write", side_effect=fake_write
+                        ):
+                            with mock.patch.object(lab.os, "close"):
+                                with mock.patch.object(lab.time, "sleep"):
+                                    rc = lab.cmd_apply_red([lab.CONFIRM_TOKEN])
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(seen_flags), 1)
+            flags = seen_flags[0]
+            self.assertEqual(flags & os.O_WRONLY, os.O_WRONLY)
+            self.assertEqual(flags & os.O_NONBLOCK, os.O_NONBLOCK)
+            if hasattr(os, "O_CLOEXEC"):
+                self.assertEqual(flags & os.O_CLOEXEC, os.O_CLOEXEC)
+            if hasattr(os, "O_NOFOLLOW"):
+                self.assertEqual(flags & os.O_NOFOLLOW, os.O_NOFOLLOW)
+            self.assertEqual(flags, _expected_open_flags())
 
 
 class NoArbitraryInputTests(unittest.TestCase):
