@@ -17,12 +17,13 @@ el Canal 6 están documentadas en
 Son observaciones acotadas a la evidencia, no una garantía universal de
 soporte ni una especificación segura de escritura USB.
 
-La evidencia actual de brillo, con doce puntos, rechaza una hipótesis exacta
-de redondeo sRGB tanto al 2% como al 7%. El resultado al 7% respalda una
-familia de cuantizadores compatible ajustada, pero no identifica una fórmula
-única ni prueba una tabla de consulta arbitraria. Esto no establece una
-implementación en Linux, un protocolo completo ni permiso para reproducir las
-cargas USB observadas.
+La evidencia ahora cubre una serie de brillo blanco con doce puntos, nueve
+colores al 7% y dos pruebas cruzadas preseleccionadas con colores mixtos. D22
+midió `#5A23F4` al 50% como GRB `17 40 b2`. D24 midió `#0E50AD` al 25% como
+`27 04 5b`. Ambos coincidieron con predicciones registradas antes de capturar.
+El conjunto completo es compatible con un modelo unificado de cuantización,
+pero no demuestra el algoritmo interno de CAM ni excluye una tabla de consulta
+u otra función que coincida en los puntos medidos.
 
 Con el brillo fijo al 7%, capturas aisladas de color global observaron 49
 tripletes repetidos: blanco como `4a 4a 4a`, rojo como `00 4a 00`, azul como
@@ -106,8 +107,9 @@ hace.
 de salida, sin reportes de feature, sin `ioctl` que mande datos. La ruta de
 lectura usa solo `os.open(..., O_RDONLY | O_NONBLOCK)` de Python más `os.read`
 y `os.close`, sin `os.write` ni `fcntl.ioctl`. Una escritura HID mal formada
-puede colgar el controlador, así que la escritura queda fuera hasta probar el
-protocolo con capturas.
+puede colgar el controlador, así que este ayudante genérico no tiene ruta de
+escritura. Las escrituras supervisadas usan el arnés cerrado separado y tramas
+congeladas.
 
 Leer `/dev/hidrawN` normalmente necesita permiso. Puedes ejecutar con `sudo` o
 agregar una regla udev:
@@ -145,44 +147,49 @@ La estructura de la trama coincide con las escrituras `Fixed` capturadas:
 | 4..150 | 49 tripletes idénticos `G R B` (147 bytes) |
 | 151..511 | relleno en cero |
 
-Cada byte de componente es `round_half_up(254 * srgb_encode(srgb_decode(v/255) * k))`
-con una constante de brillo `k`. Al 7% `k` cae en el intervalo ajustado
-`[0.069272, 0.069968]`; el codificador usa un valor representativo que reproduce
-cada byte medido al 7%. La salida se validó **byte por byte al 7%** contra nueve
-capturas reales (blanco, rojo, azul, verde, magenta, `#804020`, `#408020`,
-`#C08040`, `#7F7F7F`), y la trama commit fija `26 06` coincide en las nueve.
+Para un componente de entrada `v` y un porcentaje de brillo `p`, el candidato
+unificado calcula:
 
-**Solo el 7% está validado con capturas.** Para cualquier otro brillo el
-codificador escala `k` linealmente desde el ancla del 7%. Ese `k(b)` es un
-modelo, no anclado punto por punto, así que un byte predicho puede diferir de
-CAM en un nivel a ciertos brillos. Trata la salida fuera del 7% como una
-hipótesis, no como una medición.
+```
+floor(254 * srgb_encode(srgb_decode(v / 255) * (p / 100)) + t)
+```
+
+La evidencia combinada D1-D24 conserva
+`0.4173921478326008 <= t < 0.4276988003512372`. El codificador usa el punto
+medio `t = 0.422545474091919`. Reproduce byte por byte los nueve colores
+capturados al 7%, los doce puntos capturados de brillo blanco, D22 al 50% y D24
+al 25%. La trama commit fija `26 06` también coincide con las capturas. Es un
+modelo compatible, no una demostración de la implementación de CAM. Cualquier
+combinación de color y brillo no capturada sigue siendo una predicción.
 
 ## Arnés de laboratorio de primera escritura (cerrado, no instalado)
 
 `bin/nzxt-n9-first-write-lab` es un **arnés de laboratorio**, no una CLI de
 producto y no está cableado en los instaladores. Se usó para la primera
 escritura reversible de iluminación desde Linux en la N9 Z890 de referencia
-(CAM Fixed, Canal 6, 7%). Solo acepta cuatro superficies:
+(CAM Fixed, Canal 6, 7%). Ahora acepta cinco superficies:
 
 ```
 nzxt-n9-first-write-lab preflight
 nzxt-n9-first-write-lab apply-red I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
+nzxt-n9-first-write-lab apply-model-yellow40 I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
 nzxt-n9-first-write-lab restore-white I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
 nzxt-n9-first-write-lab --help
 ```
 
 No hay argumentos de color, brillo, canal, Report ID, ruta hidraw, número de
 LED ni payload. Las tramas están congeladas: rojo D12 `#FF0000` al 7%, blanco
-CAM D11 `#FFFFFF` al 7% (cian tenue en esta placa) y el commit fijo `26 06`.
-Las escrituras son un par de reportes exactos de 512 bytes con una pausa de
-3 ms. El dispositivo se resuelve por HID_ID `0003:00001E71:00002023`,
-descriptor y major:minor, con una segunda vinculación después de abrir y
-antes de escribir.
+CAM D11 `#FFFFFF` al 7% (cian tenue en esta placa), `#FFD000` predicho al 40%
+con GRB `89 a9 00` y el commit fijo `26 06` capturado. La trama amarilla es una
+predicción no capturada del modelo D1-D24 para una prueba física supervisada de
+falsación. No se presenta como una medición de CAM. Las escrituras son un par
+de reportes exactos de 512 bytes con una pausa de 3 ms. El dispositivo se
+resuelve por HID_ID `0003:00001E71:00002023`, descriptor y major:minor, con una
+segunda vinculación después de abrir y antes de escribir.
 
-Las pruebas offline viven en `tests/test_nzxt_n9_first_write_lab.py` y nunca
-abren hardware real. No trates este arnés como una API genérica de
-iluminación.
+Las pruebas offline viven en `tests/test_nzxt_n9_first_write_lab.py` y
+`tests/test_nzxt_n9_encoder.py`. Nunca abren hardware real. No trates este
+arnés como una API genérica de iluminación.
 
 ## Plan
 

@@ -5,12 +5,12 @@
 # READ-ONLY BY DESIGN. This tool never writes to the device: no HID output
 # reports, no feature reports, no ioctl that sends data. It only locates the
 # hidraw node and reads a few input reports (O_RDONLY). A bad HID write can
-# hang the controller, so writing stays out until the protocol is proven from
-# captures. See tools/nzxt-n9/README.md.
+# hang the controller, so this generic helper deliberately has no write path.
+# Supervised writes use the separate closed harness. See the README.
 # Part of https://github.com/Karasowl/linux-rig-tools
 set -u
 
-VERSION="0.1.0-wip"
+VERSION="0.2.0-wip"
 
 # --- USB identity of the target controller -------------------------------
 VID="1E71"   # NZXT, Inc.
@@ -38,19 +38,20 @@ rule granting your user read access.
 that CAM's 'Fixed' single-color mode sends for a given color and brightness,
 and prints them as hex. IT NEVER OPENS /dev/hidraw AND NEVER SENDS ANYTHING.
 It exists to compare our decoded model against captures, not to drive the LEDs.
-Writing any of these bytes to the device stays out of scope until a first
-controlled write is verified with an operator watching the physical LEDs.
+This generic encoder has no replay or write mode. Supervised hardware tests use
+the separate closed harness with frozen frames and an operator watching the
+physical LEDs.
 
   RRGGBB   six hex digits, the sRGB color as shown in CAM (e.g. ff0000).
   PCT      brightness percent, 0..100.
   --commit also print the fixed 'commit' frame ('26 06 ...') that follows.
   --hex-only  print only the raw hex (one frame per line), no banner or notes.
 
-Only brightness 7 is byte-for-byte validated against real captures (U8, 9
-colors). Other brightness values are MODEL EXTRAPOLATION: the brightness
-constant k(b) is scaled linearly from the 7 percent anchor and is NOT anchored
-point by point, so a predicted byte can differ from CAM by one level at some
-brightnesses. Treat non-7 output as a hypothesis, not a measurement.
+The unified model is byte-for-byte compatible with nine captured colors at 7%,
+the twelve-point captured white-brightness series, and the preselected D22 and
+D24 mixed-color cross-checks at 50% and 25%. It is still a compatible model,
+not proof of CAM's internal algorithm. Uncaptured color/brightness combinations
+remain predictions, not measurements.
 EOF
 }
 
@@ -221,19 +222,20 @@ cmd_encode() {
   python3 - "$@" <<'PYEOF'
 import math, sys
 
-# --- Verified 'Fixed' single-color frame model (U3, byte-validated in U8) ----
-# Per-component output byte = round_half_up(254 * srgb_encode(srgb_decode(v/255) * k)).
+# --- D1-D24-compatible 'Fixed' single-color frame model ---------------------
+# Per-component output byte = floor(254 * srgb_encode(
+#     srgb_decode(v/255) * (brightness/100)) + t).
 # Channel order on the wire is GRB. 49 identical triples fill the 147-byte
 # active region; the rest of the 512-byte buffer is zero. The frame is:
 #   [0]      = 0x26  (HID Report ID, first byte of the on-wire buffer)
 #   [1..3]   = 04 20 00  (sub-command 04, channel selector 20, 00)
 #   [4..150] = 49 * (G, R, B)
 #   [151..]  = zero padding to 512 bytes
-# k is the brightness constant. k(7%) sits in the fitted interval
-# [0.069272, 0.069968]; K7 below is a representative value that reproduces
-# every measured 7% capture byte for byte. k for other brightnesses is scaled
-# linearly from this 7% anchor (MODEL, not anchored point by point).
-K7      = 0.06962
+# The combined evidence retains
+#   0.4173921478326008 <= t < 0.4276988003512372.
+# T is the midpoint of that interval. It reproduces every captured D1-D24
+# point, but this fit does not prove that CAM implements this exact formula.
+T = 0.422545474091919
 N_LED   = 49
 REPORT_LEN = 512
 LOAD_HDR   = bytes([0x26, 0x04, 0x20, 0x00])
@@ -246,17 +248,14 @@ def srgb_decode(c):
 def srgb_encode(l):
     return 12.92 * l if l <= 0.0031308 else 1.055 * (l ** (1 / 2.4)) - 0.055
 
-def round_half_up(x):
-    return math.floor(x + 0.5)
-
-def component_byte(v, k):
-    return round_half_up(254 * srgb_encode(srgb_decode(v / 255) * k))
+def component_byte(v, pct):
+    linear = srgb_decode(v / 255) * (pct / 100)
+    return math.floor(254 * srgb_encode(linear) + T)
 
 def load_frame(r, g, b, pct):
-    k = K7 * (pct / 7.0)          # 7% is the validated anchor; else linear model
-    triple = bytes([component_byte(g, k),   # G
-                    component_byte(r, k),   # R
-                    component_byte(b, k)])  # B
+    triple = bytes([component_byte(g, pct),   # G
+                    component_byte(r, pct),   # R
+                    component_byte(b, pct)])  # B
     buf = bytearray(REPORT_LEN)
     buf[0:4] = LOAD_HDR
     for i in range(N_LED):
@@ -315,12 +314,18 @@ def main():
     triple = frame[4:7]
     print("color #%02X%02X%02X  brightness %d%%" % (r, g, b, pct))
     print("channel order GRB, 49 identical triples, active triple = %s" % triple.hex())
-    if pct == 7:
-        print("brightness 7%: byte-for-byte validated against real captures (U8).")
+    print("D1-D24-compatible model: floor(254*sRGB(sRGB^-1(v/255)*pct/100)+t)")
+    print("  t = %.15f, midpoint of the retained fitted interval" % T)
+    print("  [0.4173921478326008, 0.4276988003512372).")
+    print("  This fit does not prove CAM's internal algorithm.")
+    if (r, g, b, pct) == (0x5A, 0x23, 0xF4, 50):
+        print("  This exact state is capture-validated by D22.")
+    elif (r, g, b, pct) == (0x0E, 0x50, 0xAD, 25):
+        print("  This exact state is capture-validated by D24.")
+    elif pct == 7:
+        print("  The measured component levels at 7% are capture-validated.")
     else:
-        print("brightness %d%%: MODEL EXTRAPOLATION (k scaled linearly from the 7%%" % pct)
-        print("  anchor, not anchored point by point). May differ from CAM by one")
-        print("  level at some brightnesses. Only 7% is capture-validated.")
+        print("  This exact color/brightness combination may be a prediction.")
     print()
     print("load frame '26 04' (512 bytes):")
     print(frame.hex())

@@ -152,6 +152,20 @@ class FrameConstructionTests(unittest.TestCase):
         self.assertTrue(all(b == 0 for b in frame[4 + 49 * 3 :]))
         lab.validate_color_frame(frame, lab.WHITE_TRIPLE)
 
+    def test_model_yellow40_frame_shape(self) -> None:
+        frame = lab.build_color_frame(lab.YELLOW40_TRIPLE)
+        self.assertEqual(len(frame), 512)
+        self.assertEqual(frame[0:4], bytes([0x26, 0x04, 0x20, 0x00]))
+        for i in range(49):
+            start = 4 + i * 3
+            self.assertEqual(
+                frame[start : start + 3],
+                bytes([0x89, 0xA9, 0x00]),
+                "triple %d" % i,
+            )
+        self.assertTrue(all(b == 0 for b in frame[4 + 49 * 3 :]))
+        lab.validate_color_frame(frame, lab.YELLOW40_TRIPLE)
+
     def test_commit_frame_shape(self) -> None:
         frame = lab.build_commit_frame()
         self.assertEqual(len(frame), 512)
@@ -162,14 +176,18 @@ class FrameConstructionTests(unittest.TestCase):
         self.assertTrue(all(b == 0 for b in frame[16:]))
         lab.validate_commit_frame(frame)
 
-    def test_build_and_validate_frames_returns_three(self) -> None:
-        red, white, commit = lab.build_and_validate_frames()
+    def test_build_and_validate_frames_returns_four(self) -> None:
+        red, white, yellow40, commit = lab.build_and_validate_frames()
         self.assertEqual(len(red), 512)
         self.assertEqual(len(white), 512)
+        self.assertEqual(len(yellow40), 512)
         self.assertEqual(len(commit), 512)
         self.assertNotEqual(red, white)
+        self.assertNotEqual(yellow40, red)
+        self.assertNotEqual(yellow40, white)
         self.assertEqual(red[4:7], bytes([0x00, 0x4A, 0x00]))
         self.assertEqual(white[4:7], bytes([0x4A, 0x4A, 0x4A]))
+        self.assertEqual(yellow40[4:7], bytes([0x89, 0xA9, 0x00]))
 
 
 class PreflightTests(unittest.TestCase):
@@ -204,11 +222,13 @@ class PreflightTests(unittest.TestCase):
             self.assertIn("sha256", out.lower())
             self.assertIn("ff 03", out)
             self.assertIn("no", out.lower())  # cannot check RPM
-            # Digests of the three frozen frames must appear.
-            red, white, commit = lab.build_and_validate_frames()
+            # Digests of all frozen frames must appear.
+            red, white, yellow40, commit = lab.build_and_validate_frames()
             self.assertIn(lab.sha256_hex(red), out)
             self.assertIn(lab.sha256_hex(white), out)
+            self.assertIn(lab.sha256_hex(yellow40), out)
             self.assertIn(lab.sha256_hex(commit), out)
+            self.assertIn("not captured from CAM", out)
 
     def test_preflight_rejects_zero_devices(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -301,6 +321,13 @@ class WritePathTests(unittest.TestCase):
             self.assertEqual(ctx.exception.code, 1)
             self.assertEqual(opened, [])
 
+            with self._patch_env(class_dir, dev_dir):
+                with mock.patch.object(lab.os, "open", side_effect=fake_open):
+                    with self.assertRaises(SystemExit) as ctx:
+                        lab.cmd_apply_model_yellow40(["WRONG-TOKEN"])
+            self.assertEqual(ctx.exception.code, 1)
+            self.assertEqual(opened, [])
+
     def test_apply_red_two_writes_in_order_with_gap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -308,7 +335,7 @@ class WritePathTests(unittest.TestCase):
             dev_dir = root / "dev"
             dev_dir.mkdir()
             expected_node = str(dev_dir / "hidraw1")
-            red, _white, commit = lab.build_and_validate_frames()
+            red, _white, _yellow40, commit = lab.build_and_validate_frames()
 
             writes: list[tuple[int, bytes]] = []
             sleeps: list[float] = []
@@ -369,7 +396,7 @@ class WritePathTests(unittest.TestCase):
             dev_dir = root / "dev"
             dev_dir.mkdir()
             expected_node = str(dev_dir / "hidraw1")
-            _red, white, commit = lab.build_and_validate_frames()
+            _red, white, _yellow40, commit = lab.build_and_validate_frames()
 
             writes: list[bytes] = []
             sleeps: list[float] = []
@@ -417,6 +444,60 @@ class WritePathTests(unittest.TestCase):
             self.assertEqual(sleeps, [0.003])
             out = buf.getvalue()
             self.assertIn("cyan", out.lower())
+
+    def test_apply_model_yellow40_two_writes_in_order_with_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            class_dir = _install_fake_sysfs(root)
+            dev_dir = root / "dev"
+            dev_dir.mkdir()
+            expected_node = str(dev_dir / "hidraw1")
+            _red, _white, yellow40, commit = lab.build_and_validate_frames()
+
+            writes: list[bytes] = []
+            sleeps: list[float] = []
+            state = {"fd": 29, "closed": False}
+
+            def fake_open(path, flags, *a, **k):
+                self.assertEqual(str(path), expected_node)
+                self.assertEqual(flags, _expected_open_flags())
+                return state["fd"]
+
+            def fake_write(fd, data):
+                self.assertEqual(fd, state["fd"])
+                writes.append(bytes(data))
+                return len(data)
+
+            def fake_close(fd):
+                self.assertEqual(fd, state["fd"])
+                state["closed"] = True
+
+            with self._patch_env(class_dir, dev_dir):
+                with mock.patch.object(lab.os, "open", side_effect=fake_open):
+                    with mock.patch.object(
+                        lab.os, "fstat", side_effect=self._matching_fstat(29)
+                    ):
+                        with mock.patch.object(
+                            lab.os, "write", side_effect=fake_write
+                        ):
+                            with mock.patch.object(
+                                lab.os, "close", side_effect=fake_close
+                            ):
+                                with mock.patch.object(
+                                    lab.time, "sleep", side_effect=sleeps.append
+                                ):
+                                    buf = io.StringIO()
+                                    with mock.patch.object(sys, "stdout", buf):
+                                        rc = lab.cmd_apply_model_yellow40(
+                                            [lab.CONFIRM_TOKEN]
+                                        )
+            self.assertEqual(rc, 0)
+            self.assertTrue(state["closed"])
+            self.assertEqual(writes, [yellow40, commit])
+            self.assertEqual(sleeps, [0.003])
+            out = buf.getvalue()
+            self.assertIn("89 a9 00", out.lower())
+            self.assertIn("not a CAM-captured", out)
 
     def test_partial_first_write_aborts_without_commit_or_retry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -528,7 +609,7 @@ class FdBindingTests(unittest.TestCase):
             )
             dev_dir = root / "dev"
             dev_dir.mkdir()
-            red, _white, commit = lab.build_and_validate_frames()
+            red, _white, _yellow40, commit = lab.build_and_validate_frames()
 
             writes: list[bytes] = []
             state = {"fd": 21, "closed": False}
@@ -806,6 +887,7 @@ class NoArbitraryInputTests(unittest.TestCase):
         # No path that accepts color/brightness/payload/device/report-id.
         for argv in (
             ["apply-red", "ff0000", "7"],
+            ["apply-model-yellow40", "ffd000", "40"],
             ["set-color", "ff0000"],
             ["write", "payload"],
             ["--device", "/dev/hidraw1"],
@@ -830,7 +912,10 @@ class NoArbitraryInputTests(unittest.TestCase):
         out = buf.getvalue()
         self.assertIn(lab.CONFIRM_TOKEN, out)
         self.assertIn("00 4a 00", out.lower())
+        self.assertIn("89 a9 00", out.lower())
         self.assertIn("4a 4a 4a", out.lower())
+        self.assertIn("not captured from CAM", out)
+        self.assertIn(lab.YELLOW40_SHA256, out)
         self.assertIn("preflight", out)
         # Must not advertise a generic write / color / brightness API.
         self.assertNotIn("RRGGBB", out)

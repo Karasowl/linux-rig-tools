@@ -15,11 +15,12 @@ are documented in [NZXT CAM lighting observations](../../docs/NZXT-N9-CAM-LIGHTI
 They are evidence-scoped observations, not a universal support guarantee or a
 safe USB write specification.
 
-The current twelve-point brightness evidence rejects one exact sRGB rounding
-hypothesis at both 2% and 7%. The 7% result supports a fitted compatible
-quantizer family, but does not identify a unique formula or test an arbitrary
-lookup table. This does not establish a Linux implementation, a complete
-protocol, or permission to reproduce observed USB payloads.
+The evidence now covers a twelve-point white-brightness series, nine colors at
+7%, and two preselected mixed-color cross-checks. D22 measured `#5A23F4` at 50%
+as GRB `17 40 b2`. D24 measured `#0E50AD` at 25% as `27 04 5b`. Both matched
+predictions recorded before capture. The combined set is compatible with one
+unified quantizer model, but does not prove CAM's internal algorithm or exclude
+a lookup table or another function that agrees at the measured points.
 
 At fixed 7% brightness, isolated global color captures observed 49 repeated
 triples: white as `4a 4a 4a`, red as `00 4a 00`, blue as `00 00 4a`, and
@@ -96,8 +97,9 @@ device *write*, which this tool deliberately does not do.
 **Safety.** The tool never writes to the device: no HID output reports, no
 feature reports, no `ioctl` that sends data. The read path uses Python's
 `os.open(..., O_RDONLY | O_NONBLOCK)` plus `os.read`/`os.close` only, no
-`os.write`, no `fcntl.ioctl`. A bad HID write can hang the controller, so
-writing stays out until the protocol is proven from captures.
+`os.write`, no `fcntl.ioctl`. A bad HID write can hang the controller, so this
+generic helper has no write path. Supervised writes use the separate closed
+harness and frozen frames.
 
 Reading `/dev/hidrawN` usually needs permission. Either run with `sudo`, or
 add a udev rule:
@@ -134,41 +136,49 @@ The frame layout matches the captured `Fixed` writes:
 | 4..150 | 49 identical `G R B` triples (147 bytes) |
 | 151..511 | zero padding |
 
-Each component byte is `round_half_up(254 * srgb_encode(srgb_decode(v/255) * k))`
-with a brightness constant `k`. At 7% `k` sits in the fitted interval
-`[0.069272, 0.069968]`; the encoder uses a representative value that reproduces
-every measured 7% byte. The output was validated **byte for byte at 7%** against
-nine real captures (white, red, blue, green, magenta, `#804020`, `#408020`,
-`#C08040`, `#7F7F7F`), and the fixed `26 06` commit frame matches all nine.
+For an input component `v` and brightness percentage `p`, the unified candidate
+computes:
 
-**Only 7% is capture-validated.** For any other brightness the encoder scales
-`k` linearly from the 7% anchor. That `k(b)` is a model, not anchored point by
-point, so a predicted byte can differ from CAM by one level at some
-brightnesses. Treat non-7 output as a hypothesis, not a measurement.
+```
+floor(254 * srgb_encode(srgb_decode(v / 255) * (p / 100)) + t)
+```
+
+The combined D1-D24 evidence retains
+`0.4173921478326008 <= t < 0.4276988003512372`. The encoder uses the midpoint
+`t = 0.422545474091919`. It reproduces byte for byte all nine captured colors
+at 7%, the twelve captured white-brightness points, D22 at 50%, and D24 at 25%.
+The fixed `26 06` commit frame also matches the captures. This is a compatible
+model, not proof of CAM's implementation. Any uncaptured color and brightness
+combination remains a prediction.
 
 ## First-write lab harness (closed, not installed)
 
 `bin/nzxt-n9-first-write-lab` is a **laboratory harness**, not a product CLI
 and not wired into installers. It was used for the first reversible Linux
-lighting write on the reference N9 Z890 (CAM Fixed, Channel 6, 7%). It only
-accepts four surfaces:
+lighting write on the reference N9 Z890 (CAM Fixed, Channel 6, 7%). It now
+accepts five surfaces:
 
 ```
 nzxt-n9-first-write-lab preflight
 nzxt-n9-first-write-lab apply-red I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
+nzxt-n9-first-write-lab apply-model-yellow40 I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
 nzxt-n9-first-write-lab restore-white I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
 nzxt-n9-first-write-lab --help
 ```
 
 There is no color, brightness, channel, Report ID, hidraw path, LED count, or
 payload argument. Frames are frozen: D12 red `#FF0000` at 7%, D11 CAM
-`#FFFFFF` at 7% (visually dim cyan on this board), and the fixed `26 06`
-commit. Writes are a pair of exact 512-byte reports with a 3 ms gap. The
-device is resolved by HID_ID `0003:00001E71:00002023`, descriptor checks, and
-major:minor, with a second bind after open and before any write.
+`#FFFFFF` at 7% (visually dim cyan on this board), predicted `#FFD000` at 40%
+with GRB `89 a9 00`, and the captured fixed `26 06` commit. The yellow frame is
+an uncaptured D1-D24 model prediction for a supervised physical falsification
+test. It is not presented as a CAM measurement. Writes are a pair of exact
+512-byte reports with a 3 ms gap. The device is resolved by HID_ID
+`0003:00001E71:00002023`, descriptor checks, and major:minor, with a second
+bind after open and before any write.
 
-Offline unit tests live in `tests/test_nzxt_n9_first_write_lab.py` and never
-open real hardware. Do not treat this harness as a generic lighting API.
+Offline unit tests live in `tests/test_nzxt_n9_first_write_lab.py` and
+`tests/test_nzxt_n9_encoder.py`. They never open real hardware. Do not treat
+this harness as a generic lighting API.
 
 ## Plan
 

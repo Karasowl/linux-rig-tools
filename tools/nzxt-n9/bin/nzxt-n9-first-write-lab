@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-# nzxt-n9-first-write-lab — closed laboratory harness for ONE controlled
-# lighting write pair on the NZXT N9 embedded controller (1e71:2023).
+# nzxt-n9-first-write-lab — closed laboratory harness for controlled, frozen
+# lighting write pairs on the NZXT N9 embedded controller (1e71:2023).
 #
 # OFFLINE-FIRST. This unit builds and validates frozen frames only. Never run
-# apply-red or restore-white against real hardware in this unit. Writes are
-# gated behind an explicit confirmation token and are lighting-only.
+# a write command against real hardware without the supervised procedure.
+# Writes are gated behind an explicit confirmation token and are lighting-only.
 #
 # Stdlib only. No hidapi. No arbitrary color, brightness, channel, Report ID,
 # path, LED count, or payload inputs.
 #
 # Part of https://github.com/Karasowl/linux-rig-tools
-"""Closed lab harness for the first N9 lighting write (red 7% / white 7%)."""
+"""Closed N9 lighting lab: red 7%, predicted yellow 40%, white 7%."""
 
 from __future__ import annotations
 
@@ -30,6 +30,13 @@ LOAD_HEADER: Final[bytes] = bytes([0x26, 0x04, 0x20, 0x00])
 RED_TRIPLE: Final[bytes] = bytes([0x00, 0x4A, 0x00])
 # GRB triple for sRGB #FFFFFF at 7% (D11): each component = 0x4a
 WHITE_TRIPLE: Final[bytes] = bytes([0x4A, 0x4A, 0x4A])
+# Frozen model prediction for sRGB #FFD000 at 40%. Unlike red and white, this
+# exact state has not been captured from CAM. It is the supervised physical
+# falsification point for the D1-D24 compatible model. Never parameterize it.
+YELLOW40_TRIPLE: Final[bytes] = bytes([0x89, 0xA9, 0x00])
+YELLOW40_SHA256: Final[str] = (
+    "c8e1db05b544d92df8815e82e64dba2d23aa92f71d50861b58eba368b6d62138"
+)
 # Fixed commit frame prefix, byte-identical across every Fixed capture
 COMMIT_PREFIX: Final[bytes] = bytes.fromhex(
     "26062000010000310000800032000001"
@@ -112,15 +119,19 @@ def validate_commit_frame(frame: bytes) -> None:
         raise ValueError("commit frame padding is not all zero")
 
 
-def build_and_validate_frames() -> tuple[bytes, bytes, bytes]:
-    """Build red, white and commit in memory and validate before any I/O."""
+def build_and_validate_frames() -> tuple[bytes, bytes, bytes, bytes]:
+    """Build all three frozen colors and commit, then validate before I/O."""
     red = build_color_frame(RED_TRIPLE)
     white = build_color_frame(WHITE_TRIPLE)
+    yellow40 = build_color_frame(YELLOW40_TRIPLE)
     commit = build_commit_frame()
     validate_color_frame(red, RED_TRIPLE)
     validate_color_frame(white, WHITE_TRIPLE)
+    validate_color_frame(yellow40, YELLOW40_TRIPLE)
+    if hashlib.sha256(yellow40).hexdigest() != YELLOW40_SHA256:
+        raise ValueError("yellow40 frame hash differs from frozen value")
     validate_commit_frame(commit)
-    return red, white, commit
+    return red, white, yellow40, commit
 
 
 def sha256_hex(data: bytes) -> str:
@@ -326,15 +337,15 @@ def _open_flags() -> int:
     return flags
 
 
-def run_preflight_checks() -> tuple[str, bytes, bytes, bytes]:
+def run_preflight_checks() -> tuple[str, bytes, bytes, bytes, bytes]:
     """Shared read-only preflight. Never opens /dev/hidraw.
 
-    Returns (resolved_node, red, white, commit).
+    Returns (resolved_node, red, white, predicted yellow at 40%, commit).
     """
-    red, white, commit = build_and_validate_frames()
+    red, white, yellow40, commit = build_and_validate_frames()
     node = resolve_hidraw()
     read_and_check_descriptor(node)
-    return node, red, white, commit
+    return node, red, white, yellow40, commit
 
 
 # --- Commands ---------------------------------------------------------------
@@ -342,13 +353,15 @@ def run_preflight_checks() -> tuple[str, bytes, bytes, bytes]:
 
 def cmd_preflight() -> int:
     """Strictly read-only preflight. Prints node and frame digests."""
-    node, red, white, commit = run_preflight_checks()
+    node, red, white, yellow40, commit = run_preflight_checks()
     print("nzxt-n9-first-write-lab preflight  OK (read-only, no hidraw open)")
     print("  resolved node (not opened): %s" % node)
     print("  HID_ID                    : %s" % TARGET_HID_ID)
     print("  report descriptor         : %d bytes, Output 0x26 present" % DESCRIPTOR_LEN)
     print("  red  #FF0000 @ 7%%  sha256 : %s" % sha256_hex(red))
     print("  white #FFFFFF @ 7%% sha256 : %s" % sha256_hex(white))
+    print("  yellow #FFD000 @ 40%% sha256: %s" % sha256_hex(yellow40))
+    print("    status: frozen D1-D24 model prediction, not captured from CAM")
     print("  commit (26 06)     sha256 : %s" % sha256_hex(commit))
     print()
     print(
@@ -443,7 +456,7 @@ def _write_pair(node: str, data_frame: bytes, commit: bytes) -> None:
 def cmd_apply_red(args: list[str]) -> int:
     """Apply frozen red #FF0000 at 7%, then commit. Requires confirm token."""
     _require_token(args)
-    node, red, _white, commit = run_preflight_checks()
+    node, red, _white, _yellow40, commit = run_preflight_checks()
     _write_pair(node, red, commit)
     print("nzxt-n9-first-write-lab apply-red  wrote data + commit (512 + 512)")
     print("  node : %s" % node)
@@ -464,10 +477,37 @@ def cmd_apply_red(args: list[str]) -> int:
     return 0
 
 
+def cmd_apply_model_yellow40(args: list[str]) -> int:
+    """Apply frozen predicted #FFD000 at 40%, then commit. Requires token."""
+    _require_token(args)
+    node, _red, _white, yellow40, commit = run_preflight_checks()
+    _write_pair(node, yellow40, commit)
+    print(
+        "nzxt-n9-first-write-lab apply-model-yellow40  wrote data + commit"
+        " (512 + 512)"
+    )
+    print("  node : %s" % node)
+    print("  data : #FFD000 at 40% (frozen predicted GRB 89 a9 00 x 49)")
+    print("  model: compatible with D1-D24, not a CAM-captured yellow frame")
+    print("  gap  : %.3f s" % COMMIT_GAP_S)
+    print("  commit: fixed 26 06 frame")
+    print()
+    print("  Observe the physical LEDs now. Expected: solid golden yellow.")
+    print(
+        "  This is a falsification test of a compatible model, not proof of"
+    )
+    print("  CAM's internal algorithm. Restore with restore-white after observing.")
+    print(
+        "  This harness cannot evaluate cooling. Confirm fan and pump health"
+    )
+    print("  only by independent physical observation.")
+    return 0
+
+
 def cmd_restore_white(args: list[str]) -> int:
     """Restore frozen white #FFFFFF at 7%, then commit. Requires token."""
     _require_token(args)
-    node, _red, white, commit = run_preflight_checks()
+    node, _red, white, _yellow40, commit = run_preflight_checks()
     _write_pair(node, white, commit)
     print(
         "nzxt-n9-first-write-lab restore-white  wrote data + commit (512 + 512)"
@@ -498,6 +538,7 @@ nzxt-n9-first-write-lab — closed laboratory harness for NZXT N9 lighting
 Usage:
   nzxt-n9-first-write-lab preflight
   nzxt-n9-first-write-lab apply-red <CONFIRM_TOKEN>
+  nzxt-n9-first-write-lab apply-model-yellow40 <CONFIRM_TOKEN>
   nzxt-n9-first-write-lab restore-white <CONFIRM_TOKEN>
   nzxt-n9-first-write-lab --help
 
@@ -506,6 +547,9 @@ channel, Report ID, hidraw path, LED count, payload, or arbitrary bytes.
 
 Frozen frames (exactly 512 bytes each, built from closed constants):
   red    #FF0000 at 7%  header 26 04 20 00, GRB triple 00 4a 00 x 49
+  yellow #FFD000 at 40% header 26 04 20 00, GRB triple 89 a9 00 x 49
+         frozen D1-D24 model prediction, not captured from CAM
+         sha256 c8e1db05b544d92df8815e82e64dba2d23aa92f71d50861b58eba368b6d62138
   white  #FFFFFF at 7%  header 26 04 20 00, GRB triple 4a 4a 4a x 49
   commit fixed prefix   26 06 20 00 01 00 00 31 00 00 80 00 32 00 00 01
 
@@ -513,15 +557,15 @@ CONFIRM_TOKEN (required for any write, single fixed string):
   I-CONFIRM-1E71:2023-LIGHTING-ONLY-WRITE
 
 preflight is strictly read-only: resolves the hidraw via sysfs, checks the
-HID report descriptor, and validates the three frozen frames in memory. It
+HID report descriptor, and validates the frozen frames in memory. It
 never opens /dev/hidrawN.
 
-apply-red and restore-white re-run those checks, then open only the resolved
-node with O_WRONLY|O_NONBLOCK (plus O_CLOEXEC/O_NOFOLLOW when available),
-re-bind the open fd to the sysfs identity (char device, major:minor, HID_ID,
-descriptor), write the data frame, wait exactly 3 ms, and write the commit.
-A partial write or post-open mismatch aborts with no retry and no further
-bytes. O_NONBLOCK is not a write timeout for hidraw.
+The three write commands re-run those checks, then open only the resolved node
+with O_WRONLY|O_NONBLOCK (plus O_CLOEXEC/O_NOFOLLOW when available), re-bind
+the open fd to the sysfs identity (char device, major:minor, HID_ID,
+descriptor), write the data frame, wait exactly 3 ms, and write the commit. A
+partial write or post-open mismatch aborts with no retry and no further bytes.
+O_NONBLOCK is not a write timeout for hidraw.
 
 This unit must not be run against real hardware without an operator present.
 The harness cannot check fan or pump RPM: 'ff 03' is a heartbeat without
@@ -551,6 +595,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_preflight()
     if cmd == "apply-red":
         return cmd_apply_red(rest)
+    if cmd == "apply-model-yellow40":
+        return cmd_apply_model_yellow40(rest)
     if cmd == "restore-white":
         return cmd_restore_white(rest)
 
