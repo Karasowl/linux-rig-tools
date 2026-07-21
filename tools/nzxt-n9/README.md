@@ -110,6 +110,42 @@ then `sudo udevadm control --reload && sudo udevadm trigger`.
 
 Requires `python3` (>=3.10). No `hidapi` dependency.
 
+## Frame encoder (offline, does not send)
+
+`nzxt-n9 encode` builds, in memory, the 512-byte `Fixed` single-color lighting
+frame for a color and brightness and prints it as hex. It is a decoding aid, a
+way to check our model against captures. **It never opens `/dev/hidraw` and
+never sends anything.** Writing any of these bytes to the controller stays out
+of scope until a first controlled write is verified with an operator watching
+the physical LEDs.
+
+```
+nzxt-n9 encode ff0000 7            # red at 7%, prints the load frame in hex
+nzxt-n9 encode 804020 7 --commit   # also print the fixed '26 06' commit frame
+nzxt-n9 encode 00ff00 7 --hex-only # raw hex only, one frame per line
+```
+
+The frame layout matches the captured `Fixed` writes:
+
+| offset | meaning |
+|---|---|
+| 0 | `0x26` HID Report ID (first byte of the on-wire buffer) |
+| 1..3 | `04 20 00` (sub-command `04`, channel selector `20`, `00`) |
+| 4..150 | 49 identical `G R B` triples (147 bytes) |
+| 151..511 | zero padding |
+
+Each component byte is `round_half_up(254 * srgb_encode(srgb_decode(v/255) * k))`
+with a brightness constant `k`. At 7% `k` sits in the fitted interval
+`[0.069272, 0.069968]`; the encoder uses a representative value that reproduces
+every measured 7% byte. The output was validated **byte for byte at 7%** against
+nine real captures (white, red, blue, green, magenta, `#804020`, `#408020`,
+`#C08040`, `#7F7F7F`), and the fixed `26 06` commit frame matches all nine.
+
+**Only 7% is capture-validated.** For any other brightness the encoder scales
+`k` linearly from the 7% anchor. That `k(b)` is a model, not anchored point by
+point, so a predicted byte can differ from CAM by one level at some
+brightnesses. Treat non-7 output as a hypothesis, not a measurement.
+
 ## Plan
 
 1. **Captures** (see [docs/CAPTURE-GUIDE.md](../../docs/CAPTURE-GUIDE.md)):

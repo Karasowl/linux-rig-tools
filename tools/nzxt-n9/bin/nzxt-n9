@@ -21,8 +21,9 @@ cat <<'EOF'
 nzxt-n9 — read-only helper for NZXT N9 embedded controller (1e71:2023)
 
 Usage:
-  nzxt-n9 status        Read a few 'ff 03' input reports and decode them.
-  nzxt-n9 find          Print the hidraw node for 1e71:2023 and exit.
+  nzxt-n9 status                 Read a few 'ff 03' input reports and decode them.
+  nzxt-n9 find                   Print the hidraw node for 1e71:2023 and exit.
+  nzxt-n9 encode RRGGBB PCT      Print the 512-byte 'Fixed' lighting frame in hex.
   nzxt-n9 --version
   nzxt-n9 -h | --help
 
@@ -32,6 +33,24 @@ it carries NO live CPU/GPU temp, fan RPM or pump telemetry on hid-generic —
 only a serial echo and a per-frame counter. This tool never writes to the
 device. Reading /dev/hidrawN usually needs root: run with sudo, or add a udev
 rule granting your user read access.
+
+'encode' is a PURELY OFFLINE frame encoder. It computes, in memory, the bytes
+that CAM's 'Fixed' single-color mode sends for a given color and brightness,
+and prints them as hex. IT NEVER OPENS /dev/hidraw AND NEVER SENDS ANYTHING.
+It exists to compare our decoded model against captures, not to drive the LEDs.
+Writing any of these bytes to the device stays out of scope until a first
+controlled write is verified with an operator watching the physical LEDs.
+
+  RRGGBB   six hex digits, the sRGB color as shown in CAM (e.g. ff0000).
+  PCT      brightness percent, 0..100.
+  --commit also print the fixed 'commit' frame ('26 06 ...') that follows.
+  --hex-only  print only the raw hex (one frame per line), no banner or notes.
+
+Only brightness 7 is byte-for-byte validated against real captures (U8, 9
+colors). Other brightness values are MODEL EXTRAPOLATION: the brightness
+constant k(b) is scaled linearly from the 7 percent anchor and is NOT anchored
+point by point, so a predicted byte can differ from CAM by one level at some
+brightnesses. Treat non-7 output as a hypothesis, not a measurement.
 EOF
 }
 
@@ -192,9 +211,132 @@ sys.exit(main())
 PYEOF
 }
 
+cmd_encode() {
+  command -v python3 >/dev/null 2>&1 || {
+    echo "error: python3 (>=3.10) is required for 'encode'" >&2
+    return 1
+  }
+  # OFFLINE ONLY. This python does arithmetic and prints hex. It performs no
+  # os.open, no file I/O to /dev/hidraw, no socket, no write of any kind.
+  python3 - "$@" <<'PYEOF'
+import math, sys
+
+# --- Verified 'Fixed' single-color frame model (U3, byte-validated in U8) ----
+# Per-component output byte = round_half_up(254 * srgb_encode(srgb_decode(v/255) * k)).
+# Channel order on the wire is GRB. 49 identical triples fill the 147-byte
+# active region; the rest of the 512-byte buffer is zero. The frame is:
+#   [0]      = 0x26  (HID Report ID, first byte of the on-wire buffer)
+#   [1..3]   = 04 20 00  (sub-command 04, channel selector 20, 00)
+#   [4..150] = 49 * (G, R, B)
+#   [151..]  = zero padding to 512 bytes
+# k is the brightness constant. k(7%) sits in the fitted interval
+# [0.069272, 0.069968]; K7 below is a representative value that reproduces
+# every measured 7% capture byte for byte. k for other brightnesses is scaled
+# linearly from this 7% anchor (MODEL, not anchored point by point).
+K7      = 0.06962
+N_LED   = 49
+REPORT_LEN = 512
+LOAD_HDR   = bytes([0x26, 0x04, 0x20, 0x00])
+# Fixed 'commit' frame, byte-identical across every capture (U8).
+COMMIT = bytes.fromhex("26062000010000310000800032000001") + bytes(REPORT_LEN - 16)
+
+def srgb_decode(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+def srgb_encode(l):
+    return 12.92 * l if l <= 0.0031308 else 1.055 * (l ** (1 / 2.4)) - 0.055
+
+def round_half_up(x):
+    return math.floor(x + 0.5)
+
+def component_byte(v, k):
+    return round_half_up(254 * srgb_encode(srgb_decode(v / 255) * k))
+
+def load_frame(r, g, b, pct):
+    k = K7 * (pct / 7.0)          # 7% is the validated anchor; else linear model
+    triple = bytes([component_byte(g, k),   # G
+                    component_byte(r, k),   # R
+                    component_byte(b, k)])  # B
+    buf = bytearray(REPORT_LEN)
+    buf[0:4] = LOAD_HDR
+    for i in range(N_LED):
+        buf[4 + i * 3 : 7 + i * 3] = triple
+    return bytes(buf)
+
+def die(msg):
+    print("error: %s" % msg, file=sys.stderr)
+    sys.exit(1)
+
+def main():
+    args = sys.argv[1:]
+    hex_only = False
+    want_commit = False
+    positional = []
+    for a in args:
+        if a == "--hex-only":
+            hex_only = True
+        elif a == "--commit":
+            want_commit = True
+        elif a.startswith("-"):
+            die("unknown option %r (see 'nzxt-n9 --help')" % a)
+        else:
+            positional.append(a)
+
+    if len(positional) != 2:
+        die("usage: nzxt-n9 encode RRGGBB PCT [--commit] [--hex-only]")
+
+    color, pct_s = positional
+    color = color.lstrip("#")
+    if len(color) != 6 or any(c not in "0123456789abcdefABCDEF" for c in color):
+        die("color must be six hex digits, e.g. ff0000")
+    r = int(color[0:2], 16); g = int(color[2:4], 16); b = int(color[4:6], 16)
+    try:
+        pct = int(pct_s)
+    except ValueError:
+        die("brightness percent must be an integer 0..100")
+    if not (0 <= pct <= 100):
+        die("brightness percent must be 0..100")
+
+    frame = load_frame(r, g, b, pct)
+
+    if hex_only:
+        print(frame.hex())
+        if want_commit:
+            print(COMMIT.hex())
+        return
+
+    # Loud, unmissable safety banner. This tool only prints bytes.
+    print("=" * 68, file=sys.stderr)
+    print("  nzxt-n9 encode  --  OFFLINE ENCODER. PRINTS BYTES, SENDS NOTHING.", file=sys.stderr)
+    print("  No /dev/hidraw is opened. No HID write happens. This is a model,", file=sys.stderr)
+    print("  not a device command. Do not replay these bytes to the hardware.", file=sys.stderr)
+    print("=" * 68, file=sys.stderr)
+
+    triple = frame[4:7]
+    print("color #%02X%02X%02X  brightness %d%%" % (r, g, b, pct))
+    print("channel order GRB, 49 identical triples, active triple = %s" % triple.hex())
+    if pct == 7:
+        print("brightness 7%: byte-for-byte validated against real captures (U8).")
+    else:
+        print("brightness %d%%: MODEL EXTRAPOLATION (k scaled linearly from the 7%%" % pct)
+        print("  anchor, not anchored point by point). May differ from CAM by one")
+        print("  level at some brightnesses. Only 7% is capture-validated.")
+    print()
+    print("load frame '26 04' (512 bytes):")
+    print(frame.hex())
+    if want_commit:
+        print()
+        print("commit frame '26 06' (512 bytes, fixed / identical in all captures):")
+        print(COMMIT.hex())
+
+main()
+PYEOF
+}
+
 case "${1:-}" in
   status)      shift; cmd_status "$@" ;;
   find)        cmd_find ;;
+  encode)      shift; cmd_encode "$@" ;;
   --version)   echo "nzxt-n9 $VERSION" ;;
   -h|--help|"") usage ;;
   *)           usage; exit 1 ;;

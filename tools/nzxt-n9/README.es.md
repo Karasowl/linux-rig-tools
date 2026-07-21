@@ -120,6 +120,43 @@ y después `sudo udevadm control --reload && sudo udevadm trigger`.
 
 Requiere `python3` (>=3.10). Sin dependencia de `hidapi`.
 
+## Codificador de tramas (offline, no envía)
+
+`nzxt-n9 encode` construye en memoria la trama de iluminación de 512 bytes del
+modo `Fixed` de un color para un color y un brillo, y la imprime en hex. Es una
+ayuda de decodificación, una forma de contrastar nuestro modelo contra las
+capturas. **Nunca abre `/dev/hidraw` y nunca envía nada.** Escribir cualquiera
+de estos bytes al controlador queda fuera de alcance hasta verificar una primera
+escritura controlada con un operador mirando los LED físicos.
+
+```
+nzxt-n9 encode ff0000 7            # rojo al 7%, imprime la trama de carga en hex
+nzxt-n9 encode 804020 7 --commit   # imprime además la trama commit fija '26 06'
+nzxt-n9 encode 00ff00 7 --hex-only # solo hex crudo, una trama por línea
+```
+
+La estructura de la trama coincide con las escrituras `Fixed` capturadas:
+
+| offset | significado |
+|---|---|
+| 0 | `0x26` Report ID HID (primer byte del buffer en el cable) |
+| 1..3 | `04 20 00` (subcomando `04`, selector de canal `20`, `00`) |
+| 4..150 | 49 tripletes idénticos `G R B` (147 bytes) |
+| 151..511 | relleno en cero |
+
+Cada byte de componente es `round_half_up(254 * srgb_encode(srgb_decode(v/255) * k))`
+con una constante de brillo `k`. Al 7% `k` cae en el intervalo ajustado
+`[0.069272, 0.069968]`; el codificador usa un valor representativo que reproduce
+cada byte medido al 7%. La salida se validó **byte por byte al 7%** contra nueve
+capturas reales (blanco, rojo, azul, verde, magenta, `#804020`, `#408020`,
+`#C08040`, `#7F7F7F`), y la trama commit fija `26 06` coincide en las nueve.
+
+**Solo el 7% está validado con capturas.** Para cualquier otro brillo el
+codificador escala `k` linealmente desde el ancla del 7%. Ese `k(b)` es un
+modelo, no anclado punto por punto, así que un byte predicho puede diferir de
+CAM en un nivel a ciertos brillos. Trata la salida fuera del 7% como una
+hipótesis, no como una medición.
+
 ## Plan
 
 1. **Capturas** (mira [docs/CAPTURE-GUIDE.md](../../docs/CAPTURE-GUIDE.md)):
