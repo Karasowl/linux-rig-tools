@@ -162,6 +162,14 @@ al 25%. La trama commit fija `26 06` también coincide con las capturas. Es un
 modelo compatible, no una demostración de la implementación de CAM. Cualquier
 combinación de color y brillo no capturada sigue siendo una predicción.
 
+La predicción antes no capturada `#FFD000` al 40%, GRB `89 a9 00`, se aplicó
+después desde Linux en la N9 de referencia. Ismael observó un resultado amarillo
+o dorado inmediato con ventiladores normales. La trama blanca capturada restauró
+el cian habitual y CAM reaplicó su estado recordado al reconectar el USB. Esto
+valida físicamente un punto generado fuera del conjunto de capturas. Respalda un
+controlador `Fixed` global genérico, pero no cubre personalización por zonas ni
+demuestra el algoritmo interno de CAM.
+
 ## Arnés de laboratorio de primera escritura (cerrado, no instalado)
 
 `bin/nzxt-n9-first-write-lab` es un **arnés de laboratorio**, no una CLI de
@@ -180,9 +188,10 @@ nzxt-n9-first-write-lab --help
 No hay argumentos de color, brillo, canal, Report ID, ruta hidraw, número de
 LED ni payload. Las tramas están congeladas: rojo D12 `#FF0000` al 7%, blanco
 CAM D11 `#FFFFFF` al 7% (cian tenue en esta placa), `#FFD000` predicho al 40%
-con GRB `89 a9 00` y el commit fijo `26 06` capturado. La trama amarilla es una
-predicción no capturada del modelo D1-D24 para una prueba física supervisada de
-falsación. No se presenta como una medición de CAM. Las escrituras son un par
+con GRB `89 a9 00` y el commit fijo `26 06` capturado. La trama amarilla era una
+predicción no capturada del modelo D1-D24 y su prueba física desde Linux produjo
+el amarillo o dorado esperado. Sigue siendo una trama generada por el modelo,
+no una medición de CAM. Las escrituras son un par
 de reportes exactos de 512 bytes con una pausa de 3 ms. El dispositivo se
 resuelve por HID_ID `0003:00001E71:00002023`, descriptor y major:minor, con una
 segunda vinculación después de abrir y antes de escribir.

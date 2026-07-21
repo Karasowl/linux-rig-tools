@@ -46,6 +46,24 @@ These are appearance reports, not calibrated output values.
 
 Enabling `Customize LED colors` disabled the global color selector and displayed a board map. During this exploration, only one clearly selectable region was found, near the upper edge. Setting it red changed only that region while the rest retained the previous global color. Turning the switch off restored the previous global color. More selectable regions remain **unknown** and need a deliberate map.
 
+## CAM state reapplied after USB reconnection
+
+**Reported controlled visual observation on 2026-07-21:** CAM held `Fixed`,
+global `#00FF00`, brightness 100%, and per-zone customization disabled. The N9
+USB device was detached from the running Windows VM. Linux then sent the frozen
+CAM-white frame at 7%, and the operator confirmed the usual light-cyan physical
+appearance with the fans still running normally. The USB device was attached
+again to the same running VM while CAM remained open. Without any click or CAM
+interaction, the physical lighting returned automatically to green at 100%.
+
+This demonstrates that, in this running CAM session, CAM remembered and
+reapplied its current lighting state when the N9 reappeared. It also separates
+CAM's remembered state from the complete `Fixed` frames sent by Linux. A prior
+VM startup showed CAM displaying the last D21 value, `#7F7F7F`, which is
+compatible with persistence across CAM or VM restarts, but that startup was not
+performed as a controlled persistence test. No USB capture is claimed for the
+reconnection observation.
+
 ## Shared controls
 
 When an effect exposed speed, its qualitative track used `Slowest`, `Slow`, `Normal`, `Fast`, and `Fastest`. Direction used the same arrow-style control where present. Some effects exposed LED or pixel size, and some exposed a movement switch.
@@ -272,13 +290,116 @@ The exact 0.07 candidate is refuted at input 127, while the nearby effective-mul
 
 D21 also establishes an adjacent threshold in the observed output: input 127 maps to `20`, while input 128 maps to `21` in D17 through D20. This does not establish behavior for unmeasured inputs or other brightness values.
 
+## USB observation from D22 mixed color at 50 percent
+
+**Verified from the controlled operator action and PCAP:** outside capture, CAM
+was prepared in global `Fixed` with per-zone customization disabled, color
+`#5A23F4`, and the individual Channel 6 brightness at 49 percent. After the
+capture was explicitly confirmed active, the operator pressed Right Arrow once
+on that slider. CAM displayed 50 percent, and the operator confirmed normal fan
+operation. No other CAM action was reported during the capture.
+
+D22 was chosen before measurement to attempt to refute a unified color and
+brightness candidate. For each input component `v` and brightness `b`, the
+candidate computes
+`floor(254 * srgb_encode(srgb_decode(v / 255) * b) + t)`. All earlier measured
+points were compatible with `t` from approximately `0.306365377` through
+`0.467255293`. At `#5A23F4` and 50 percent, that interval allowed only four GRB
+triples: `16 3f b2`, `16 40 b2`, `17 40 b2`, or `17 40 b3`.
+
+The archived PCAP has SHA-256
+`ac1c98f39e5faa69f6c684ecd8c7a90181438a18a6566a2b5fdacf627efe5f11`,
+5141 packets, and a duration of 48.744236 seconds. Exact bus 3, address 7, and
+endpoint `0x02` filtering leaves only two outgoing writes with data. Frame 2747
+is the only `26 04 20 00` write. Its active region is 49 repetitions of
+`17 40 b2`, followed by exactly 361 zero bytes. Frame 2751 is the `26 06`
+commit 3.931 ms later. Both completion records have status zero. No target
+packet is truncated or malformed.
+
+The observed triple is exactly the third pre-recorded prediction. Within this
+candidate family, D22 narrows the compatible interval to approximately
+`0.386776218` through `0.427698800`. This is the first controlled mixed-color
+cross-check away from 7 percent, so it strongly supports separability of color
+and brightness in the candidate. It does not prove that CAM implements this
+formula or exclude a lookup table or another quantizer that agrees at the
+measured points.
+
+## USB observation from D24 mixed color at 25 percent
+
+**Verified from the controlled operator action and PCAP:** outside capture, CAM
+was prepared in global `Fixed` with per-zone customization disabled, color
+`#0E50AD`, and the individual Channel 6 brightness at 24 percent. After the
+capture was explicitly confirmed active, the operator pressed Right Arrow once
+on that slider. CAM displayed 25 percent, and the operator confirmed normal fan
+operation. No other CAM action was reported during the capture.
+
+D24 was chosen before measurement as a second cross-check at a brightness far
+from both 7 and 50 percent. Within the interval retained by D22, the unified
+candidate allowed only four final GRB triples: `26 03 5a`, `26 04 5a`,
+`27 04 5a`, or `27 04 5b`.
+
+The archived PCAP has SHA-256
+`9c943091a9461eaa180a6b5702c218f679c98f5b3e0c8f633f10e8d8ac06df06`,
+27752 packets, and a duration of 218.792628 seconds. Exact bus 3, address 7,
+and endpoint `0x02` filtering leaves only two outgoing writes with data. Frame
+25681 is the only `26 04 20 00` write. Its active region is 49 repetitions of
+`27 04 5b`, followed by exactly 361 zero bytes. Frame 25685 is the only
+`26 06` commit, 2.982 ms later. Both completion records have status zero. No
+target packet is truncated or malformed.
+
+The observed triple is exactly the fourth pre-recorded prediction. Within this
+candidate family, D24 narrows the compatible interval to
+`0.4173921478326008 <= t < 0.4276988003512372`. The candidate has now survived
+controlled mixed-color cross-checks at both 25 and 50 percent in addition to
+the earlier color and brightness series. This supports a predicted Linux write
+as the next falsification step. It still does not prove CAM's internal
+implementation or exclude another function that agrees at all measured points.
+
+## D25 predicted Linux write at 40 percent
+
+**Verified from the reviewed code, offline tests, command output, and operator
+observation on 2026-07-21:** the unified D1-D24 candidate generated a previously
+uncaptured global `Fixed` state, `#FFD000` at 40 percent. The predicted wire
+triple was `89 a9 00` in GRB order. The complete 512-byte `26 04` frame had
+SHA-256 `c8e1db05b544d92df8815e82e64dba2d23aa92f71d50861b58eba368b6d62138`.
+The frame was frozen into the closed laboratory harness before the physical
+test.
+
+The implementation checkpoint `65be58601a28d979ad5f4a5987f202452f968846`
+passed 35 offline tests and an independent read-only review with no findings.
+The tests cover nine captured colors at 7 percent, twelve captured white
+brightness points, D22, D24, frame structure, the fixed commit, token gating,
+identity failures, and absence of a hidraw open during preflight. The checkpoint
+was integrated locally into master as `c449850` without push.
+
+The N9 resolved as `/dev/hidraw2` through the exact HID identity and the
+150-byte descriptor. A first unprivileged invocation failed with permission
+denied before opening the device and wrote zero bytes. The same reviewed command
+was repeated through non-interactive sudo. With CPU Package at 62 C, Linux wrote
+the frozen yellow data frame and the known commit. The operator observed an
+immediate yellow or golden physical result and confirmed that all fans continued
+spinning normally.
+
+Linux then sent the captured white frame at 7 percent with CPU Package at 75 C.
+The operator confirmed the customary cyan appearance and normal fan operation.
+After the N9 was reattached to the still-running VM, CAM automatically reapplied
+its remembered `#0E50AD` state at 25 percent, also confirmed by the operator.
+
+This physically validates construction of a previously uncaptured global
+`Fixed` color and brightness from the unified model. Together with D1-D24, it is
+sufficient engineering evidence to implement a Linux global `Fixed` controller
+with arbitrary RGB input and integer brightness from 0 through 100. It does not
+prove CAM's internal algorithm and does not cover per-zone or per-LED `Fixed`
+customization.
+
 ## Supervised Linux write and restoration
 
 **Harness:** the closed laboratory tool is
 `tools/nzxt-n9/bin/nzxt-n9-first-write-lab`. It only exposes `preflight`,
-`apply-red`, `restore-white`, and help. Frames are frozen (D12 red at 7%, D11
-CAM white at 7%, and the observed `26 06` commit). It is not a generic write
-API and is not installed by the packaging paths.
+`apply-red`, `apply-model-yellow40`, `restore-white`, and help. Frames are
+frozen (D12 red at 7%, D25 model yellow at 40%, D11 CAM white at 7%, and the
+observed `26 06` commit). It is not a generic write API and is not installed by
+the packaging paths.
 
 **Verified by the operator on 2026-07-21:** the closed Linux harness resolved
 the N9 as `/dev/hidraw4` through HID_ID `0003:00001E71:00002023`, checked the

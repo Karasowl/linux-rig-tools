@@ -151,6 +151,14 @@ The fixed `26 06` commit frame also matches the captures. This is a compatible
 model, not proof of CAM's implementation. Any uncaptured color and brightness
 combination remains a prediction.
 
+The previously uncaptured `#FFD000` at 40% prediction, GRB `89 a9 00`, was
+then applied from Linux on the reference N9. The operator observed an immediate
+yellow or golden result with normal fan operation. The captured white frame
+restored the customary cyan appearance, and CAM reapplied its remembered state
+after USB reattachment. This physically validates one generated point outside
+the capture set. It supports a generic global `Fixed` controller, but it does
+not cover per-zone customization or prove CAM's internal algorithm.
+
 ## First-write lab harness (closed, not installed)
 
 `bin/nzxt-n9-first-write-lab` is a **laboratory harness**, not a product CLI
@@ -169,9 +177,10 @@ nzxt-n9-first-write-lab --help
 There is no color, brightness, channel, Report ID, hidraw path, LED count, or
 payload argument. Frames are frozen: D12 red `#FF0000` at 7%, D11 CAM
 `#FFFFFF` at 7% (visually dim cyan on this board), predicted `#FFD000` at 40%
-with GRB `89 a9 00`, and the captured fixed `26 06` commit. The yellow frame is
-an uncaptured D1-D24 model prediction for a supervised physical falsification
-test. It is not presented as a CAM measurement. Writes are a pair of exact
+with GRB `89 a9 00`, and the captured fixed `26 06` commit. The yellow frame was
+an uncaptured D1-D24 model prediction and its Linux physical test produced the
+expected yellow or golden result. It remains a model-generated frame, not a CAM
+measurement. Writes are a pair of exact
 512-byte reports with a 3 ms gap. The device is resolved by HID_ID
 `0003:00001E71:00002023`, descriptor checks, and major:minor, with a second
 bind after open and before any write.

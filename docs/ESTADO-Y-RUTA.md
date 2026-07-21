@@ -142,7 +142,7 @@ deducir un protocolo se necesita cambiar una sola variable por vez.
 - Se repitieron estados para comprobar igualdad byte por byte.
 - Se registraron por separado las acciones humanas y la evidencia del PCAP.
 
-**Qué obtuvimos:** una colección D1 a D21 que permite comparar cambios pequeños
+**Qué obtuvimos:** una colección D1 a D24 que permite comparar cambios pequeños
 sin atribuir a un gesto paquetes causados por otro dispositivo o por una acción
 anterior.
 
@@ -197,8 +197,9 @@ demostrar escritura real sin empezar por ventiladores, bomba o firmware.
 - `20 00` todavía no tiene una semántica demostrada.
 - La interfaz de CAM decía Canal 6, pero no se ha demostrado dónde se codifica
   el canal.
-- Solo el 7 por ciento está validado con colores. Otros brillos son una
-  extrapolación que puede diferir de CAM por un nivel.
+- Nueve colores están validados al 7 por ciento y dos colores mixtos están
+  validados al 25 y 50 por ciento. Los demás cruces entre color y brillo todavía
+  son una extrapolación que puede diferir de CAM por un nivel.
 
 La evidencia detallada está en
 [NZXT-N9-CAM-LIGHTING.md](NZXT-N9-CAM-LIGHTING.md).
@@ -320,6 +321,93 @@ una desigualdad entre los bytes enviados. Puede proceder de la respuesta
 espectral de los LED, su calibración eléctrica, el difusor o diferencias entre
 canales a brillo bajo. Estas causas son inferencias y todavía no se han medido.
 
+### 10. Separación entre el estado guardado por CAM y el estado físico
+
+**Hecho visual verificado el 21 de julio de 2026:** CAM quedó en `Fixed`, verde
+`#00FF00` al 100 por ciento y sin personalización por zonas. La N9 volvió a
+Linux y recibió la trama blanca congelada al 7 por ciento. Ismael confirmó el
+cian habitual y ventiladores normales. Al conectar nuevamente la N9 a la misma
+VM, con CAM abierto y sin hacer clic ni cambiar controles, la placa volvió por
+sí sola a verde al 100 por ciento.
+
+Esto demuestra que CAM conserva y reaplica su estado actual cuando el
+dispositivo reaparece durante la misma sesión. También demuestra que el valor
+`#7F7F7F` mostrado al abrir CAM era estado propio de CAM y no contaminó las
+escrituras completas de rojo y blanco realizadas desde Linux. El arranque que
+mostró nuevamente `#7F7F7F` es compatible con persistencia entre sesiones, pero
+esa parte no se ejecutó como prueba controlada.
+
+Un PCAP abierto durante la búsqueda manual de verde al 100 por ciento quedó
+clasificado como exploratorio y contaminado. Incluyó clics, borrados,
+correcciones y valores intermedios no controlados. No se usa para validar ni
+refutar el modelo de `Fixed`.
+
+### 11. Primera prueba cruzada de color y brillo
+
+**Hecho verificado el 21 de julio de 2026:** CAM se preparó fuera de captura en
+`Fixed`, sin personalización por zonas, con `#5A23F4` y brillo individual del
+Canal 6 al 49 por ciento. Durante una captura anunciada y exclusiva, Ismael
+pulsó una sola vez Flecha derecha para llegar al 50 por ciento. Confirmó el 50
+por ciento y ventiladores normales.
+
+La tesis registrada antes de medir permitía únicamente cuatro resultados GRB:
+`16 3f b2`, `16 40 b2`, `17 40 b2` o `17 40 b3`. El PCAP contiene un único par
+de escrituras salientes. La trama `26 04` repite `17 40 b2` exactamente 49
+veces y la trama `26 06` completa el cambio 3.931 ms después. Las dos
+transferencias terminaron con estado exitoso y no existen escrituras
+competidoras del N9.
+
+La tesis unificada supera esta prueba discriminante y su intervalo compatible
+de cuantización se reduce de aproximadamente `0.306365 a 0.467255` a
+`0.386776 a 0.427699`. Esto es evidencia fuerte a favor del modelo, no una
+demostración universal.
+
+### 12. Segunda prueba cruzada de color y brillo
+
+**Hecho verificado el 21 de julio de 2026:** CAM se preparó fuera de captura en
+`Fixed`, sin personalización por zonas, con `#0E50AD` y brillo individual del
+Canal 6 al 24 por ciento. Durante una captura anunciada y exclusiva, Ismael
+pulsó una sola vez Flecha derecha para llegar al 25 por ciento. Confirmó el 25
+por ciento y ventiladores normales.
+
+La tesis registrada antes de medir permitía únicamente cuatro resultados GRB:
+`26 03 5a`, `26 04 5a`, `27 04 5a` o `27 04 5b`. El PCAP contiene un único par
+de escrituras salientes. La trama `26 04` repite `27 04 5b` exactamente 49
+veces y la trama `26 06` completa el cambio 2.982 ms después. Las dos
+transferencias terminaron con estado exitoso y no existen escrituras
+competidoras del N9.
+
+La tesis unificada supera también D24 y su intervalo compatible queda en
+`0.4173921478326008 <= t < 0.4276988003512372`. El modelo ya superó cruces
+controlados con colores mixtos al 25 y 50 por ciento, además de las series
+anteriores de color y brillo.
+
+### 13. Escritura Linux predicha para un estado nunca capturado
+
+**Hecho verificado el 21 de julio de 2026:** el modelo construyó `#FFD000` al
+40 por ciento, una combinación nunca capturada de CAM. La trama usa el triple
+GRB `89 a9 00` repetido 49 veces y tiene SHA-256
+`c8e1db05b544d92df8815e82e64dba2d23aa92f71d50861b58eba368b6d62138`.
+
+El checkpoint `65be586` pasó 35 pruebas offline y una revisión independiente
+sin hallazgos. Un primer intento sin privilegios terminó en permiso denegado
+antes de abrir `hidraw` y escribió cero bytes. La repetición mediante sudo abrió
+la N9 validada y escribió la trama amarilla y el commit. Ismael observó un color
+amarillo o dorado inmediato y confirmó que todos los ventiladores siguieron
+girando normalmente.
+
+La restauración blanca al 7 por ciento devolvió el cian habitual y mantuvo los
+ventiladores normales. Al reconectar la N9 a la VM, CAM reaplicó automáticamente
+`#0E50AD` al 25 por ciento. Las temperaturas de las dos escrituras fueron 62 C
+y 75 C, debajo del límite de 85 C.
+
+**Conclusión:** el modo `Fixed` global queda cubierto con evidencia suficiente
+para implementar en Linux cualquier color RGB y cualquier brillo entero de 0 a
+100. El codificador genérico ya existe offline. Todavía no existe una ruta
+genérica de escritura ni una interfaz visual, porque el arnés físico conserva
+solo tres estados congelados. La personalización por zonas o LED dentro de
+`Fixed` sigue abierta y no forma parte de esta conclusión.
+
 ## Técnicas usadas y qué esperamos obtener de cada una
 
 | Técnica | Para qué se usa | Qué ha producido | Qué esperamos obtener después |
@@ -327,12 +415,12 @@ canales a brillo bajo. Estas causas son inferencias y todavía no se han medido.
 | Inventario con sysfs, `lsusb`, hidraw y sensores | Identificar el hardware real y sus límites | VID, PID, interfaces y ausencia de PWM Linux | Detección estable sin depender de números de bus o hidraw |
 | QEMU/KVM y passthrough USB | Ejecutar las aplicaciones oficiales contra el hardware real | Laboratorio Windows reproducible | Capturar Cooling, efectos y dispositivos restantes |
 | `usbmon`, tshark y PCAP | Observar bytes sin escribir desde Linux | Handshake, heartbeat y tramas de iluminación | Descubrir telemetría, canales, efectos y controles |
-| Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D21 con acciones aisladas | Reducir falsos positivos y establecer causalidad más fuerte |
+| Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D24 con acciones aisladas | Reducir falsos positivos y establecer causalidad más fuerte |
 | Repetición byte por byte | Separar coincidencias de comportamiento reproducible | Repetición de brillo y colores mixtos | Tramas doradas para pruebas automáticas |
-| Pruebas discriminantes | Refutar fórmulas que coinciden por accidente | Refutación del sRGB exacto y del factor 0.07 exacto | Anclar la transformación en más brillos |
+| Pruebas discriminantes | Refutar fórmulas que coinciden por accidente | El modelo sobrevivió D22, D24 y una escritura física inédita D25 | Diseñar la ruta genérica de escritura global y mapear zonas por separado |
 | Análisis del descriptor HID | Resolver formato y dirección de reportes | Report ID `0x26`, longitud 512 y ausencia de Feature reports | Construir escrituras con la forma correcta |
 | Análisis estático de CAM | Buscar nombres, PID, tablas y pistas no visibles en PCAP | Referencias N7 y N9, lógica nativa localizada | Acotar opcodes o transformaciones que las capturas no distinguen |
-| Codificación offline | Probar la implementación sin tocar hardware | Encoder byte exacto al 7 por ciento | Usar la misma lógica en la primera escritura y en upstream |
+| Codificación offline | Probar la implementación sin tocar hardware | Encoder compatible con 9 colores, 12 brillos, D22, D24 y D25 | Reutilizarlo en un controlador global con puertas de seguridad |
 | Revisión independiente | Intentar refutar hallazgos antes de integrarlos | Correcciones de telemetría, formato HID y documentación | Evitar que una inferencia de un solo análisis se convierta en driver |
 
 ## Modelo técnico actual del N9
@@ -356,6 +444,11 @@ canales a brillo bajo. Estas causas son inferencias y todavía no se han medido.
 - La herramienta actual puede leer sin escribir.
 - La herramienta actual puede generar bytes sin abrir el dispositivo.
 - Linux ya produjo y revirtió un cambio físico de iluminación fija.
+- Linux construyó y aplicó físicamente un color y brillo globales nunca
+  capturados de CAM mediante el modelo unificado.
+- El protocolo de `Fixed` global está suficientemente cubierto para un
+  controlador de color RGB y brillo de 0 a 100. La escritura genérica y la
+  interfaz visual todavía no están implementadas.
 - La superficie observada son zonas integradas de la cubierta de la N9. Los
   aros de ventiladores y la RAM no cambiaron durante la prueba.
 - No se ha capturado la página Cooling, por lo que no conocemos RPM,
@@ -510,10 +603,11 @@ ventiladores de la placa.
 
 ## En qué debemos seguir ahora
 
-El primer hito está cerrado. La decisión de prioridad recomendada es continuar
-con Cooling del N9 antes que con efectos RGB. Recuperar lectura de RPM y
-control de ventiladores resuelve una limitación funcional mayor, pero también
-exige un protocolo de seguridad más estricto.
+El primer hito está cerrado. Ismael decidió el 21 de julio de 2026 completar
+por completo la NZXT N9 antes de avanzar al AIO Cooler Master, la matriz del
+chasis, la GPU, el teclado u otro hardware. El alcance restante de la placa se
+divide en iluminación completa y refrigeración. Ismael decidió completar
+primero la iluminación con todo su alcance y abordar refrigeración después.
 
 Hasta entonces, el arnés de iluminación debe seguir siendo de laboratorio:
 tramas congeladas, sin parámetros libres y sin empaquetado de sistema. No se
