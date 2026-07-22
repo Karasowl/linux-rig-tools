@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""Deliberately utilitarian PyQt6 laboratory for N9 Fixed per-zone colours."""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+LIB = Path(__file__).resolve().parents[1] / "lib"
+sys.path.insert(0, str(LIB))
+
+from PyQt6.QtCore import QRegularExpression, QTimer, Qt
+from PyQt6.QtGui import QColor, QRegularExpressionValidator
+from PyQt6.QtWidgets import (
+    QApplication, QDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
+    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QColorDialog,
+    QSlider, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
+)
+
+from nzxt_n9_fixed import (
+    COMMIT_FRAME, D32_PCAP_PATH, N9FixedError, N9FixedWriter, OfflineWriter,
+    build_color_frame, extract_d32_frame, parse_hex_color, read_only_readiness,
+)
+
+
+class ZoneButton(QPushButton):
+    def __init__(self, number: int, click_callback) -> None:
+        super().__init__(str(number))
+        self.number = number
+        self._click_callback = click_callback
+        self.setToolTip("Zona %d" % number)
+        self.setMinimumSize(35, 29)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802, Qt API
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._click_callback(self.number - 1, bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier))
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class FixedLabWindow(QMainWindow):
+    def __init__(self, offline: bool, *, writer=None, d32_loader=extract_d32_frame) -> None:
+        super().__init__()
+        self.offline = offline
+        self.writer = writer if writer is not None else (OfflineWriter() if offline else N9FixedWriter())
+        self.d32_loader = d32_loader
+        self.colors = [(255, 255, 255)] * 49
+        self.selected: set[int] = set()
+        self.raw_d32_restored = False
+        self.busy = False
+        self.setWindowTitle("nzxt-n9-lab: Fixed per-zone laboratory")
+        self.resize(810, 620)
+        self._build_ui()
+        self._update_ui()
+        if offline:
+            self._log("Modo offline: no se abrirá hidraw.")
+        else:
+            self._probe_real_readiness()
+
+    def _build_ui(self) -> None:
+        root = QWidget()
+        layout = QHBoxLayout(root)
+        map_box = QGroupBox("Recorrido confirmado: 1-17 izquierda, 18-34 abajo, 35-49 derecha")
+        grid = QGridLayout(map_box)
+        self.zone_buttons: list[ZoneButton] = []
+        for zone in range(49):
+            button = ZoneButton(zone + 1, self._zone_clicked)
+            self.zone_buttons.append(button)
+            if zone < 17:
+                grid.addWidget(button, zone, 0)
+            elif zone < 34:
+                grid.addWidget(button, 17, zone - 16)
+            else:
+                grid.addWidget(button, zone - 33, 17)
+        layout.addWidget(map_box, 2)
+
+        panel = QVBoxLayout()
+        self.device_label = QLabel()
+        self.state_label = QLabel()
+        self.map_state_label = QLabel()
+        self.map_state_label.setWordWrap(True)
+        panel.addWidget(self.device_label)
+        panel.addWidget(self.state_label)
+        panel.addWidget(self.map_state_label)
+
+        selection_row = QHBoxLayout()
+        self.all_button = QPushButton("Seleccionar todas")
+        self.clear_button = QPushButton("Limpiar selección")
+        self.all_button.clicked.connect(self._select_all)
+        self.clear_button.clicked.connect(self._clear_selection)
+        selection_row.addWidget(self.all_button)
+        selection_row.addWidget(self.clear_button)
+        panel.addLayout(selection_row)
+
+        color_row = QHBoxLayout()
+        self.color_button = QPushButton("Elegir color…")
+        self.color_button.clicked.connect(self._choose_color)
+        self.hex_input = QLineEdit("FFFFFF")
+        self.hex_input.setMaxLength(6)
+        self.hex_input.setValidator(QRegularExpressionValidator(QRegularExpression("[0-9A-Fa-f]{6}")))
+        self.hex_input.textChanged.connect(self._hex_changed)
+        color_row.addWidget(self.color_button)
+        color_row.addWidget(self.hex_input)
+        panel.addLayout(color_row)
+
+        brightness_form = QFormLayout()
+        self.brightness_slider = QSlider(Qt.Orientation.Horizontal)
+        self.brightness_slider.setRange(0, 100)
+        self.brightness_slider.setValue(25)
+        self.brightness_spin = QSpinBox()
+        self.brightness_spin.setRange(0, 100)
+        self.brightness_spin.setValue(25)
+        self.brightness_slider.valueChanged.connect(self.brightness_spin.setValue)
+        self.brightness_spin.valueChanged.connect(self.brightness_slider.setValue)
+        brightness_form.addRow("Brillo global", self.brightness_slider)
+        brightness_form.addRow("Porcentaje", self.brightness_spin)
+        panel.addLayout(brightness_form)
+
+        self.apply_button = QPushButton("Aplicar")
+        self.restore_button = QPushButton("Restaurar D32")
+        self.apply_button.clicked.connect(self._apply)
+        self.restore_button.clicked.connect(self._restore_d32)
+        panel.addWidget(self.apply_button)
+        panel.addWidget(self.restore_button)
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setMinimumHeight(160)
+        panel.addWidget(QLabel("Registro"))
+        panel.addWidget(self.log, 1)
+        layout.addLayout(panel, 3)
+        self.setCentralWidget(root)
+
+    def _log(self, text: str) -> None:
+        self.log.append(text)
+
+    def _probe_real_readiness(self) -> None:
+        """Read-only status for the visible device and temperature state."""
+        try:
+            details = read_only_readiness()
+        except N9FixedError as exc:
+            message = str(exc)
+            if "CPU Package" in message:
+                self.state_label.setText("Estado: temperatura no disponible o >=85 C")
+                self.device_label.setText("Dispositivo: no listo")
+            else:
+                self.state_label.setText("Estado: dispositivo ausente o no válido")
+                self.device_label.setText("Dispositivo: ausente")
+            self._log("Preflight read-only: %s" % message)
+        else:
+            self.device_label.setText("Dispositivo: %s" % details)
+            self.state_label.setText("Estado: listo")
+            self._log("Preflight read-only: %s" % details)
+
+    def _zone_clicked(self, zone: int, multi: bool) -> None:
+        if self.busy:
+            return
+        if multi:
+            if zone in self.selected:
+                self.selected.remove(zone)
+            else:
+                self.selected.add(zone)
+        else:
+            self.selected = {zone}
+        self.state_label.clear()
+        self._update_ui()
+
+    def _select_all(self) -> None:
+        self.selected = set(range(49))
+        self.state_label.clear()
+        self._update_ui()
+
+    def _clear_selection(self) -> None:
+        self.selected.clear()
+        self.state_label.clear()
+        self._update_ui()
+
+    def _choose_color(self) -> None:
+        text = self.hex_input.text()
+        initial = QColor("#" + text) if len(text) == 6 else QColor("#ffffff")
+        color = QColorDialog.getColor(initial, self, "Elegir color RGB")
+        if color.isValid():
+            self.hex_input.setText(color.name(QColor.NameFormat.HexRgb)[1:].upper())
+
+    def _hex_changed(self, _text: str) -> None:
+        if not self.busy:
+            self.state_label.clear()
+        self._update_ui()
+
+    def _hex_color(self):
+        try:
+            return parse_hex_color(self.hex_input.text())
+        except ValueError:
+            return None
+
+    def _operation(self, label: str, frame: bytes) -> None:
+        try:
+            result = self.writer.send(frame, COMMIT_FRAME)
+        except (N9FixedError, ValueError, OSError) as exc:
+            if "CPU Package" in str(exc):
+                self.state_label.setText("Estado: temperatura no disponible o >=85 C")
+            elif "N9 HID_ID" in str(exc) or "descriptor" in str(exc):
+                self.state_label.setText("Estado: dispositivo ausente o no válido")
+            else:
+                self.state_label.setText("Estado: error")
+            self._log("ERROR %s: %s" % (label, exc))
+        else:
+            self.state_label.setText("Estado: éxito")
+            self._log("ÉXITO %s: %s" % (label, result))
+        finally:
+            self.busy = False
+            self._update_ui()
+
+    def _start_operation(self, label: str, frame: bytes) -> None:
+        self.busy = True
+        self.state_label.setText("Estado: escribiendo")
+        self._update_ui()
+        QTimer.singleShot(0, lambda: self._operation(label, frame))
+
+    def _apply(self) -> None:
+        color = self._hex_color()
+        if not self.selected:
+            self.state_label.setText("Estado: sin selección")
+            self._log("No se envió nada: selecciona una o más zonas.")
+            return
+        if color is None:
+            self.state_label.setText("Estado: hex inválido")
+            self._log("No se envió nada: RGB debe ser RRGGBB.")
+            return
+        for index in self.selected:
+            self.colors[index] = color
+        self.raw_d32_restored = False
+        frame = build_color_frame(self.colors, self.brightness_spin.value())
+        self._start_operation("Aplicar 49 zonas", frame)
+
+    def _restore_d32(self) -> None:
+        try:
+            frame = self.d32_loader()
+        except N9FixedError as exc:
+            self.state_label.setText("Estado: error D32")
+            self._log("ERROR restauración D32: %s" % exc)
+            return
+        self.raw_d32_restored = True
+        self._start_operation("Restauración D32 exacta", frame)
+
+    def _update_ui(self) -> None:
+        color = self._hex_color()
+        if self.busy:
+            state = "escribiendo"
+        elif color is None:
+            state = "hex inválido"
+        elif not self.selected:
+            state = "sin selección"
+        elif len(self.selected) == 1:
+            state = "selección simple"
+        elif len(self.selected) == 49:
+            state = "todas las zonas"
+        else:
+            state = "selección múltiple (%d)" % len(self.selected)
+        persistent = (
+            self.state_label.text().startswith("Estado: éxito")
+            or self.state_label.text().startswith("Estado: error")
+            or self.state_label.text().startswith("Estado: temperatura")
+            or self.state_label.text().startswith("Estado: dispositivo")
+        )
+        if not self.busy and not persistent:
+            self.state_label.setText("Estado: %s" % state)
+        if self.offline:
+            self.device_label.setText("Dispositivo: offline, cero escrituras")
+        self.map_state_label.setText(
+            "Mapa: estado preparado, no representa el D32 físico restaurado." if self.raw_d32_restored
+            else "Mapa: estado local preparado, no enviado."
+        )
+        for index, button in enumerate(self.zone_buttons):
+            red, green, blue = self.colors[index]
+            selected = index in self.selected
+            luminance = (red * 299 + green * 587 + blue * 114) / 1000
+            foreground = "#000" if luminance > 150 else "#fff"
+            border = "3px solid #ff9800" if selected else "1px solid #666"
+            button.setStyleSheet("background:#%02x%02x%02x;color:%s;border:%s;" % (red, green, blue, foreground, border))
+            button.setEnabled(not self.busy)
+        enabled = not self.busy
+        self.all_button.setEnabled(enabled)
+        self.clear_button.setEnabled(enabled)
+        self.color_button.setEnabled(enabled)
+        self.hex_input.setEnabled(enabled)
+        self.brightness_slider.setEnabled(enabled)
+        self.brightness_spin.setEnabled(enabled)
+        self.apply_button.setEnabled(enabled)
+        self.restore_button.setEnabled(enabled)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="N9 Fixed per-zone laboratory")
+    parser.add_argument("--offline", action="store_true", help="validate frames without opening hidraw")
+    args = parser.parse_args(argv)
+    application = QApplication(["nzxt-n9-lab"])
+    window = FixedLabWindow(args.offline)
+    window.show()
+    return application.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -18,7 +18,7 @@ las que tu equipo necesite. Ninguna depende de otra parte del repo.
 |-------------|----------|--------|
 | [`rig-diagnose`](tools/rig-diagnose/) | Inventaría tus controladores RGB/ventiladores/refrigeración e informa qué tiene (o no) soporte en Linux. Solo lectura, cero dependencias. | ✅ funciona hoy |
 | [`rig-profiles`](tools/rig-profiles/) | Perfiles `quiet` / `balanced` / `performance` para CPU (governor + EPP) y GPU NVIDIA (límite de potencia) sin software del fabricante. | ✅ funciona hoy |
-| [`nzxt-n9`](tools/nzxt-n9/) | Curvas de ventiladores, bomba y RGB del controlador embebido en placas NZXT N9 (`1e71:2023`, N9 Z890). | 🔬 ingeniería inversa |
+| [`nzxt-n9`](tools/nzxt-n9/) | Curvas de ventiladores, bomba y RGB del controlador embebido en placas NZXT N9 (`1e71:2023`, N9 Z890). Interfaz de laboratorio Fixed por zona disponible. | 🔬 ingeniería inversa |
 | [`cm-nex-digital`](tools/cm-nex-digital/) | Bomba, ventiladores, pantalla digital y ARGB del AIO Cooler Master MasterLiquid Core Nex Digital (`2516:0232`). | 🔬 ingeniería inversa |
 | [`chassis-ledmatrix`](tools/chassis-ledmatrix/) | Efectos (reloj de arena, reloj, animaciones…) de controladores genéricos de matriz LED de chasis (`ff00:020c` y similares). | 🔬 ingeniería inversa |
 

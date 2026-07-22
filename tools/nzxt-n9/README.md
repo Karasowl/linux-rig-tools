@@ -8,6 +8,52 @@ harness exist. Fan duty, pump control, and general RGB APIs are not ready.
 This device is why your radiator fans, pump header and board RGB can only be
 configured from the BIOS or from NZXT CAM on Windows.
 
+## Fixed per-zone laboratory UI
+
+`bin/nzxt-n9-lab` is a provisional PyQt6 application for exploring only the
+capture-backed `Fixed` lighting vector. It is intentionally utilitarian, not
+the final application design. Its protocol/model module is separate from the
+device writer and UI so a later UI can replace this surface without rewriting
+the motor.
+
+```
+nzxt-n9-lab --offline
+```
+
+Offline mode is the required development and mechanical-QA mode. It shows the
+49-zone route (1-17 down the left, 18-34 across the bottom, 35-49 down the
+right), supports single click and Ctrl+Click selection, RGB hex or Qt color
+selection, a global brightness, and an explicit **Apply** button. Apply always
+builds the complete 49-zone `GRB` vector and fixed `26 06` commit, but offline
+mode validates them without opening hidraw.
+
+Without `--offline`, the sole target is resolved by HID_ID
+`0003:00001E71:00002023`. It validates the 150-byte descriptor, character
+device major:minor before and after open, rechecks HID_ID and descriptor, and
+requires one unambiguous CPU Package sensor below 85 C. It opens only that node
+with write-only nonblocking/no-follow flags, writes the two 512-byte frames
+3 ms apart, and stops without retry on every error. There are no controls for
+payloads, Report IDs, device paths, LED counts, Cooling, firmware, fans, or
+other opcodes.
+
+`Restaurar D32` reads the private D32 PCAP at its fixed local path using
+`tshark`, extracts the final target frame read-only, and requires SHA-256
+`24a9fd2fbb05769c56505907506c186ba313baa0a277a2506ceb831e77573c70` before it
+can send it with the fixed commit. The PCAP is never included in Git. After a
+D32 restore the editor deliberately says that its prepared map is not the
+physical D32 state, since the original CAM RGB values cannot be honestly
+recovered from the raw vector.
+
+The per-zone candidate is explicitly a thesis:
+
+```
+floor(255 * srgb_encode(srgb_decode(v / 255) * pct / 100) + 0.422545474091919)
+```
+
+D26-D32 support scale 255 through the 25% `89` value. It can still differ by
+one byte from the earlier scale-254 global candidate at uncaptured inputs.
+This is not presented as a fact about CAM's internal algorithm.
+
 ## CAM lighting observations
 
 Manual NZXT CAM observations for one N9 Z890 board, CAM 4.76.5, and Channel 6

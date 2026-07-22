@@ -9,6 +9,52 @@ bomba y una API RGB general todavía no están listos. Este dispositivo es la
 razón de que los ventiladores del radiador, el header de bomba y el RGB de la
 placa solo puedan configurarse desde la BIOS o desde NZXT CAM en Windows.
 
+## Interfaz de laboratorio Fixed por zona
+
+`bin/nzxt-n9-lab` es una aplicación provisional en PyQt6 para explorar solo
+el vector de iluminación `Fixed` respaldado por capturas. Es utilitaria a
+propósito, no el diseño final. El módulo de protocolo y modelo está separado
+del escritor del dispositivo y de la interfaz, así la interfaz definitiva
+podrá sustituir esta superficie sin reescribir el motor.
+
+```
+nzxt-n9-lab --offline
+```
+
+El modo offline es obligatorio para desarrollo y QA mecánico. Muestra el
+recorrido de 49 zonas, 1-17 por la izquierda, 18-34 por abajo y 35-49 por la
+derecha. Permite selección con clic y Ctrl+Clic, RGB hexadecimal o el selector
+Qt, brillo global y un botón explícito **Aplicar**. Aplicar siempre construye
+el vector completo de 49 zonas en `GRB` y el commit fijo `26 06`, pero offline
+los valida sin abrir hidraw.
+
+Sin `--offline`, el único destino se resuelve por HID_ID
+`0003:00001E71:00002023`. Valida el descriptor de 150 bytes, major:minor del
+dispositivo de caracteres antes y después de abrir, vuelve a comprobar HID_ID
+y descriptor, y exige un único sensor CPU Package por debajo de 85 C. Abre
+solo ese nodo con flags de escritura, nonblocking y no-follow, escribe las dos
+tramas de 512 bytes con 3 ms entre ellas y no reintenta ante ningún error. No
+hay controles para payloads, Report ID, rutas, número de LEDs, Cooling,
+firmware, ventiladores ni otros opcodes.
+
+`Restaurar D32` lee el PCAP privado D32 en su ruta local fija mediante
+`tshark`, extrae de forma de solo lectura la trama final objetivo y exige el
+SHA-256 `24a9fd2fbb05769c56505907506c186ba313baa0a277a2506ceb831e77573c70`
+antes de enviarla con el commit fijo. El PCAP no se incluye nunca en Git. Tras
+restaurar D32 el editor declara que su mapa preparado no representa el estado
+físico D32, porque no se pueden recuperar honestamente los RGB originales de
+CAM a partir del vector crudo.
+
+El candidato por zona se declara como tesis:
+
+```
+floor(255 * srgb_encode(srgb_decode(v / 255) * pct / 100) + 0.422545474091919)
+```
+
+D26-D32 respaldan escala 255 mediante el valor `89` al 25%. En entradas no
+capturadas aún puede diferir por un byte del candidato global anterior de
+escala 254. No se presenta como un hecho sobre el algoritmo interno de CAM.
+
 ## Observaciones de iluminación de CAM
 
 Las observaciones manuales de NZXT CAM para una placa N9 Z890, CAM 4.76.5 y

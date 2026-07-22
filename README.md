@@ -17,7 +17,7 @@ your rig needs. Nothing here depends on anything else in the repo.
 |------|--------------|--------|
 | [`rig-diagnose`](tools/rig-diagnose/) | Inventories your RGB/fan/cooling controllers and reports what is (un)supported on Linux. Read-only, zero dependencies. | ✅ works today |
 | [`rig-profiles`](tools/rig-profiles/) | `quiet` / `balanced` / `performance` profiles for CPU (governor + EPP) and NVIDIA GPU (power limit) without vendor software. | ✅ works today |
-| [`nzxt-n9`](tools/nzxt-n9/) | Fan curves, pump header and RGB control for the controller embedded in NZXT N9 motherboards (`1e71:2023`, N9 Z890). | 🔬 reverse engineering |
+| [`nzxt-n9`](tools/nzxt-n9/) | Fan curves, pump header and RGB control for the controller embedded in NZXT N9 motherboards (`1e71:2023`, N9 Z890). Fixed per-zone laboratory UI available. | 🔬 reverse engineering |
 | [`cm-nex-digital`](tools/cm-nex-digital/) | Pump, fans, digital display and ARGB of the Cooler Master MasterLiquid Core Nex Digital AIO (`2516:0232`). | 🔬 reverse engineering |
 | [`chassis-ledmatrix`](tools/chassis-ledmatrix/) | Effects (hourglass, clock, animations…) of generic chassis LED-matrix controllers (`ff00:020c` and friends). | 🔬 reverse engineering |
 
