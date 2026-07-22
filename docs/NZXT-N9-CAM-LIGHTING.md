@@ -553,6 +553,85 @@ LED spectral response, electrical channel calibration, the optical diffuser,
 or low-brightness channel behavior are compatible explanations, but none has
 been measured yet.
 
+## USB observations from D35 through D38, Spectrum Wave series
+
+**Method.** Four isolated captures on 2026-07-21 and 2026-07-22 examined the
+`Spectrum Wave` effect with exactly one human action per capture window and a
+passive tail after it: D35 switched `Fixed` to `Spectrum Wave` and stayed
+passive for about 174 seconds, D36 stepped speed from `Normal` to `Fast` with
+one Right Arrow press, D37 changed direction from right to left with one click,
+and D38 repeated D35 after the operator restored `Normal` speed, right
+direction, and `Fixed` outside capture. Each window captured the whole usbmon
+bus 3 with the N9 `1e71:2023` at device address 7, and target traffic was
+isolated by that exact address.
+
+**Verified from PCAP:** every capture contains exactly one 512-byte interrupt
+OUT write to endpoint `0x02` and no other host write of any size in its
+window. No `26 06` commit was transmitted in any of the four captures. Each
+write completed with status 0 and was answered within 2 ms by the known
+`ff 01` acknowledgment, which echoed the `2a 04` opcode. The `ff 03` heartbeat
+continued at its 3-second cadence with its incrementing frame counter, and
+bytes 16 through 511 of every inbound frame in these captures were zero.
+
+The four frames, showing every nonzero byte:
+
+| Series | Action | Bytes 0..5 | Byte 55 | Bytes 58..59 | Post-write silence |
+| --- | --- | --- | ---: | --- | ---: |
+| D35 | `Fixed` to `Spectrum Wave` | `2a 04 20 20 02 fa` | `00` | `31 03` | 174.0 s |
+| D36 | Speed `Normal` to `Fast` | `2a 04 20 20 02 96` | `00` | `31 03` | 64.3 s |
+| D37 | Direction right to left | `2a 04 20 20 02 96` | `02` | `31 03` | 19.1 s |
+| D38 | Repeat of D35 | `2a 04 20 20 02 fa` | `00` | `31 03` | 75.0 s |
+
+All remaining bytes are zero in all four frames. D36 differs from D35 only at
+byte 5, D37 differs from D36 only at byte 55, and D38 is byte-for-byte
+identical to D35, verified by comparing the SHA-256 of the extracted 512-byte
+payloads.
+
+**Verified by operator observation:** the continuous rainbow started with D35,
+visibly accelerated with D36, and reversed its travel with D37, while all fans
+kept spinning normally throughout the series.
+
+**Verified conclusion:** for `Spectrum Wave` on this board and CAM release,
+CAM transmits a single `2a 04` configuration frame per user action, with no
+commit and no further traffic, and the animation keeps running on its own.
+The effect is rendered by the controller firmware. CAM does not stream
+animation frames in this mode. The absence of a commit is now observed four
+times for Spectrum Wave. Extending that absence to other modes that may use
+`2a 04` remains an inference until they are captured.
+
+Proposed field map with evidence classification:
+
+- Byte 0 `2a`: declared Output Report ID, now observed in traffic for the
+  first time. Its use for this write is **verified**. Reading `2a 04` as the
+  general animated-effect configuration family is an **inference**.
+- Byte 1 `04`: occupies the sub-command position that `Fixed` uses for `04`.
+  Same-role interpretation is an **inference**.
+- Byte 2 `20`: matches the value and position of the `Fixed` channel selector
+  byte. Channel-selector interpretation is an **inference**.
+- Byte 3 `20`: differs from the `00` that `Fixed` carries at this offset. Its
+  meaning is **unknown**.
+- Byte 4 `02`: constant across the series. Its identity as the `Spectrum
+  Wave` mode identifier is an **inference** until a second animated mode is
+  captured and shows a different value here.
+- Byte 5: speed-related field, **verified** to be the only byte that changed
+  on a speed step. Measured `fa` (250) for `Normal` and `96` (150) for
+  `Fast`. "Lower is faster" is an **inference** from these two points plus
+  the observed acceleration. The field width is **unknown**: byte 6 was `00`
+  in both states, which fits either a 1-byte field followed by padding or a
+  little-endian 16-bit value. The `Slowest`, `Slow`, and `Fastest` values are
+  uncaptured.
+- Byte 55: direction-related field, **verified** to be the only byte that
+  changed on a direction change. Measured `00` for right and `02` for left.
+  The encoding rationale (why `02` and not `01`) and any other valid values
+  are **unknown**.
+- Bytes 58..59 `31 03`: constant in all four frames. Meaning **unknown**.
+  `0x31` is 49 decimal, the `Fixed` zone count, which is a suggestive
+  coincidence and nothing more.
+
+These captures decode observations only. They do not establish a safe write
+specification for animated modes, and no `2a 04` frame should be written to
+the device from them.
+
 ## Anomalies and open questions
 
 **Reported manual observation:** while changing effects or profiles, radiator fan lighting and possibly pump lighting stopped being visible. Only RAM and motherboard lighting remained visible.
@@ -597,9 +676,10 @@ Status meaning in this table:
 | `21 03` | IN, controller to host | Channel and accessory information reply to `20 03` | Verified |
 | `26 04` | OUT, host to controller | Lighting data write | Verified |
 | `26 06` | OUT, host to controller | Lighting commit that follows a `26 04` write | Verified |
-| `ff 01` | IN, controller to host | Generic acknowledgment that echoes the recognized opcode, observed after `20 03`, after `26 04`, and after `26 06` | Verified |
+| `2a 04` | OUT, host to controller | Animated-effect configuration write (`Spectrum Wave`, D35-D38), sent once per user action with no commit | Verified |
+| `ff 01` | IN, controller to host | Generic acknowledgment that echoes the recognized opcode, observed after `20 03`, after `26 04`, after `26 06`, and after `2a 04` | Verified |
 | `ff 03` | IN, controller to host | Periodic heartbeat about every 3 seconds carrying a frame counter, with no telemetry payload | Verified |
 
-**Verified from the descriptor, not observed in traffic:** the report descriptor also declares Output Report IDs `12 22 24 2a f2 fe e2 f4` and Input Report IDs `13 23 25 27 29 2b e3 f5` that CAM did not exercise in any captured session. Their existence is a descriptor fact. Their meaning is **unknown** because no capture drove them.
+**Verified from the descriptor, not observed in traffic:** the report descriptor also declares Output Report IDs `12 22 24 f2 fe e2 f4` and Input Report IDs `13 23 25 27 29 2b e3 f5` that CAM did not exercise in any captured session. Output Report ID `2a` left this list when the D35-D38 series observed it in traffic. Their existence is a descriptor fact. Their meaning is **unknown** because no capture drove them.
 
 **Unknown, and important for the cooling goal:** none of the current captures contains real temperature telemetry or fan RPM telemetry. The `ff 03` heartbeat carries only a frame counter, not sensor values, and the `Monitor Temperature` lighting effect reads its source from the host, not from a controller telemetry frame. Decoding actual temperature and RPM would require a new capture taken on CAM's Cooling page (fan curves, pump control, sensor readouts), which no session in this document exercised. Do not infer a telemetry opcode from the lighting captures, and do not send any of these opcodes to the device.

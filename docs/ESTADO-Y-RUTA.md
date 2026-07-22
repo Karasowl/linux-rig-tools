@@ -1,6 +1,6 @@
 # Estado, método y ruta del proyecto
 
-Actualizado: 21 de julio de 2026.
+Actualizado: 22 de julio de 2026.
 
 Este es el documento descriptivo vivo de `linux-rig-tools`. Explica qué se ha
 hecho, por qué se hizo, qué evidencia existe, qué falta y cómo se controla el
@@ -455,6 +455,56 @@ permite probar directamente esos casos sin volver a construir tramas a mano.
 Los efectos animados, Cooling, bomba y ventiladores permanecen fuera de este
 hito.
 
+### 15. Serie Spectrum Wave, primera decodificación de un modo animado
+
+**Hechos verificados el 22 de julio de 2026, capturas D35 a D38:**
+
+- Cuatro capturas aisladas con una sola acción humana por ventana: entrar a
+  Spectrum Wave desde Fixed, un paso de velocidad de `Normal` a `Fast`, un
+  cambio de dirección de derecha a izquierda y una repetición de la entrada
+  tras restaurar el estado inicial fuera de captura.
+- Cada acción produjo exactamente una escritura interrupt OUT de 512 bytes que
+  comienza `2a 04 20 20`. En ninguna de las cuatro ventanas existe una trama
+  commit `26 06` ni ninguna otra escritura posterior del host. D35 conservó
+  174 segundos de silencio tras la trama y D38 revalidó ese silencio con 75
+  segundos.
+- El controlador confirmó cada trama con el acuse `ff 01` conocido, que repite
+  el opcode `2a 04`, dentro de los 2 ms posteriores a completarse la escritura. El heartbeat
+  `ff 03` continuó con su cadencia de 3 segundos y su contador documentado.
+- El paso de velocidad cambió únicamente el byte 5, de `fa` (250) a `96`
+  (150). El cambio de dirección cambió únicamente el byte 55, de `00` a `02`.
+  Los bytes 58 y 59 llevan la constante `31 03` en las cuatro tramas. El resto
+  del buffer es cero.
+- La trama de D38 es idéntica byte por byte a la de D35, verificado por
+  SHA-256 de los payloads extraídos. La transición es reproducible.
+- Ismael confirmó físicamente que el arcoíris arrancó, se aceleró de forma
+  visible e invirtió su sentido, y que los ventiladores permanecieron normales
+  durante toda la serie.
+
+**Inferencias:**
+
+- El byte 4 `02` como identificador del modo Spectrum Wave. Falta capturar un
+  segundo modo animado para discriminarlo.
+- Menor valor de velocidad es más rápido, con solo dos puntos medidos.
+- La familia `2a 04` como escritura de configuración de efectos animados,
+  distinta del `26 04` de Fixed.
+
+**Desconocido:**
+
+- El ancho del campo de velocidad, 1 o 2 bytes, porque el byte 6 fue `00` en
+  ambos estados. Los valores de `Slowest`, `Slow` y `Fastest` no están
+  capturados.
+- El significado de `31 03` y del byte 3 `20`, que en Fixed es `00`.
+
+**Conclusión:** para Spectrum Wave en esta placa, CAM envía una única trama de
+configuración por acción y la animación vive en el firmware del controlador.
+CAM no transmite frames de animación y no usó commit en ninguna de las cuatro
+capturas de este modo. Extender esa ausencia de commit a otros modos que usen
+`2a 04` sigue siendo una inferencia hasta capturarlos. Los
+detalles verificados y la clasificación de cada campo están en
+[NZXT-N9-CAM-LIGHTING.md](NZXT-N9-CAM-LIGHTING.md) y en los archivos
+D35-ANALYSIS.md a D38-ANALYSIS.md junto a las capturas privadas.
+
 ## Técnicas usadas y qué esperamos obtener de cada una
 
 | Técnica | Para qué se usa | Qué ha producido | Qué esperamos obtener después |
@@ -462,7 +512,7 @@ hito.
 | Inventario con sysfs, `lsusb`, hidraw y sensores | Identificar el hardware real y sus límites | VID, PID, interfaces y ausencia de PWM Linux | Detección estable sin depender de números de bus o hidraw |
 | QEMU/KVM y passthrough USB | Ejecutar las aplicaciones oficiales contra el hardware real | Laboratorio Windows reproducible | Capturar Cooling, efectos y dispositivos restantes |
 | `usbmon`, tshark y PCAP | Observar bytes sin escribir desde Linux | Handshake, heartbeat y tramas de iluminación | Descubrir telemetría, canales, efectos y controles |
-| Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D32 con acciones aisladas | Reducir falsos positivos y establecer causalidad más fuerte |
+| Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D38 con acciones aisladas | Reducir falsos positivos y establecer causalidad más fuerte |
 | Repetición byte por byte | Separar coincidencias de comportamiento reproducible | Repetición de brillo y colores mixtos | Tramas doradas para pruebas automáticas |
 | Pruebas discriminantes | Refutar fórmulas que coinciden por accidente | El modelo sobrevivió D22, D24 y una escritura física inédita D25. D26 a D32 aislaron estado y límites por zona | Usar el laboratorio Fixed para detectar cruces que difieran de la tesis por zona |
 | Análisis del descriptor HID | Resolver formato y dirección de reportes | Report ID `0x26`, longitud 512 y ausencia de Feature reports | Construir escrituras con la forma correcta |
@@ -480,10 +530,11 @@ hito.
 | Entrada | `11 02` | Respuesta de información de firmware |
 | Salida | `20 03` | Solicitud de canales o accesorios |
 | Entrada | `21 03` | Respuesta de canales o accesorios |
-| Entrada | `ff 01` | Confirmación que repite el opcode aceptado |
+| Entrada | `ff 01` | Confirmación que repite el opcode aceptado, observada tras `20 03`, `26 04`, `26 06` y `2a 04` |
 | Entrada | `ff 03` | Heartbeat periódico, sin telemetría viva |
 | Salida | `26 04` | Datos de iluminación observados |
 | Salida | `26 06` | Commit o latch de iluminación observado |
+| Salida | `2a 04` | Configuración de efecto animado observada en Spectrum Wave, una trama por acción y sin commit |
 
 ### Lo que ya puede afirmarse
 
@@ -508,7 +559,12 @@ hito.
   aros de ventiladores y la RAM no cambiaron durante la prueba.
 - No se ha capturado la página Cooling, por lo que no conocemos RPM,
   temperaturas, duty ni curvas del N9.
-- No se han decodificado los modos animados.
+- De los modos animados, Spectrum Wave ya tiene su trama de configuración
+  `2a 04` capturada y verificada. El efecto reside en el firmware y CAM no
+  transmite frames continuos en ese modo. Los campos de velocidad y dirección
+  están observados con dos valores cada uno. Los demás modos animados siguen
+  sin capturar y ningún campo de `2a 04` es todavía una especificación segura
+  de escritura.
 
 ## Primer hito (cerrado)
 
@@ -669,13 +725,16 @@ tramas congeladas, sin parámetros libres y sin empaquetado de sistema. No se
 debe ampliar a Cooling, firmware, duty ni curvas sin capturas nuevas y
 supervisión física.
 
-La siguiente unidad de iluminación es comprobar si el modelo global de color y
-brillo puede reutilizarse por zona o si la personalización emplea una
-cuantización distinta, como sugiere la diferencia `89` frente a `88` al 25 por
-ciento. El mapa de 49 zonas ya tiene sus seis límites anclados. Ahora conviene
-capturar un color personalizado no binario en una sola zona y después el mismo
-color con un cambio exacto de brillo. Solo entonces corresponde construir el
-editor visual de 49 zonas en Linux.
+Fixed quedó aceptado como completo tras el QA físico del laboratorio visual, y
+la serie D35 a D38 abrió la decodificación de los modos animados con Spectrum
+Wave. La siguiente unidad natural es capturar un segundo modo animado, por
+ejemplo Breathing o Rainbow Flow, con la misma disciplina de una acción por
+ventana. Ese contraste discrimina si el byte 4 de la trama `2a 04` es
+realmente el identificador de modo y si la familia `2a` cubre los demás
+efectos. Después conviene capturar los extremos de velocidad `Slowest` y
+`Fastest` de Spectrum Wave, que fijan el rango del campo de velocidad y pueden
+resolver si ocupa 1 o 2 bytes. Con esos anclajes, el mapa de campos de los
+modos animados puede empezar a promoverse con evidencia en vez de suposición.
 
 ## Artefactos principales
 

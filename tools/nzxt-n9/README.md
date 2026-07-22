@@ -124,6 +124,39 @@ an effective multiplier around 0.069 in that candidate family. This is a fitted
 compatibility interval, not a confirmed formula. These captures do not prove
 one triple per LED, confirm a channel index, or establish safe write semantics.
 
+## Animated modes: first findings (Spectrum Wave)
+
+The D35-D38 capture series (2026-07-21/22) isolated `Spectrum Wave` with one
+human action per window. Verified from the PCAPs: each action produced exactly
+one 512-byte interrupt OUT frame starting `2a 04 20 20`, with **no `26 06`
+commit** and no further host writes afterwards (up to 174 s of observed
+silence while the animation kept running). The controller acknowledged each
+frame with the known `ff 01` echo of the `2a 04` opcode. The operator
+confirmed the rainbow started, visibly accelerated on the speed step, and
+reversed on the direction change, with all fans normal throughout. The repeat
+capture reproduced the first frame byte for byte.
+
+Verified conclusion for this board, CAM 4.76.5, and Channel 6: the animation
+is rendered by the controller firmware. CAM sends a single configuration
+frame per user action and does not stream animation frames in this mode.
+
+Observed fields, evidence-classified:
+
+- Byte 4 `02` as the `Spectrum Wave` mode identifier is an **inference**
+  until a second animated mode is captured.
+- Byte 5 is speed-related (**verified** as the only byte changed by a speed
+  step): `fa` (250) for `Normal`, `96` (150) for `Fast`. "Lower is faster"
+  is an **inference** from two points, and the field width (1 or 2 bytes) is
+  **unknown**.
+- Byte 55 is direction-related (**verified** as the only byte changed by a
+  direction change): `00` right, `02` left. The encoding rationale is
+  **unknown**.
+- Bytes 58-59 carry the constant `31 03`. Meaning **unknown**.
+
+These are decoding observations, not a safe write specification. No
+animated-mode write path exists or is authorized from them. Details live in
+[NZXT CAM lighting observations](../../docs/NZXT-N9-CAM-LIGHTING.md).
+
 ## Device
 
 | | |

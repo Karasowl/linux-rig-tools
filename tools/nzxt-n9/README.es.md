@@ -132,6 +132,42 @@ familia de candidatos. Este es un intervalo de compatibilidad ajustado, no
 una fórmula confirmada. Estas capturas no prueban un triplete por LED, no
 confirman un índice de canal ni establecen una semántica segura de escritura.
 
+## Modos animados: primeros hallazgos (Spectrum Wave)
+
+La serie de capturas D35 a D38 (21 y 22 de julio de 2026) aisló
+`Spectrum Wave` con una sola acción humana por ventana. Verificado en los
+PCAPs: cada acción produjo exactamente una trama interrupt OUT de 512 bytes
+que comienza `2a 04 20 20`, **sin commit `26 06`** y sin más escrituras del
+host después (hasta 174 s de silencio observado mientras la animación seguía
+corriendo). El controlador confirmó cada trama con el eco `ff 01` conocido del
+opcode `2a 04`. El operador confirmó que el arcoíris arrancó, se aceleró de
+forma visible con el paso de velocidad y se invirtió con el cambio de
+dirección, con todos los ventiladores normales durante la serie. La captura de
+repetición reprodujo la primera trama byte por byte.
+
+Conclusión verificada para esta placa, CAM 4.76.5 y el Canal 6: la animación
+la genera el firmware del controlador. CAM envía una única trama de
+configuración por acción del usuario y no transmite frames de animación en
+este modo.
+
+Campos observados, clasificados por evidencia:
+
+- El byte 4 `02` como identificador del modo `Spectrum Wave` es una
+  **inferencia** hasta capturar un segundo modo animado.
+- El byte 5 está ligado a la velocidad (**verificado** como el único byte que
+  cambió con un paso de velocidad): `fa` (250) para `Normal`, `96` (150) para
+  `Fast`. Que menor sea más rápido es una **inferencia** con dos puntos, y el
+  ancho del campo (1 o 2 bytes) es **desconocido**.
+- El byte 55 está ligado a la dirección (**verificado** como el único byte que
+  cambió con un cambio de dirección): `00` derecha, `02` izquierda. La razón
+  de esa codificación es **desconocida**.
+- Los bytes 58 y 59 llevan la constante `31 03`. Significado **desconocido**.
+
+Son observaciones de decodificación, no una especificación segura de
+escritura. No existe ni se autoriza desde ellas una ruta de escritura de modos
+animados. Los detalles están en
+[Observaciones de iluminación de NZXT CAM](../../docs/NZXT-N9-CAM-LIGHTING.md).
+
 ## Dispositivo
 
 | | |
