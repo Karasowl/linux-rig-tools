@@ -16,33 +16,54 @@ the final application design. Its protocol/model module is separate from the
 device writer and UI so a later UI can replace this surface without rewriting
 the motor.
 
+From this repository checkout, run the uninstalled laboratory directly:
+
 ```
-nzxt-n9-lab --offline
+cd tools/nzxt-n9
+./bin/nzxt-n9-lab --offline
 ```
+
+It requires Python 3 and PyQt6. On CachyOS or Arch the relevant signed
+repository package is `python-pyqt6`. This laboratory is intentionally not
+wired into `install.sh`, packaging, or a system service.
 
 Offline mode is the required development and mechanical-QA mode. It shows the
 49-zone route (1-17 down the left, 18-34 across the bottom, 35-49 down the
 right), supports single click and Ctrl+Click selection, RGB hex or Qt color
-selection, a global brightness, and an explicit **Apply** button. Apply always
-builds the complete 49-zone `GRB` vector and fixed `26 06` commit, but offline
-mode validates them without opening hidraw.
+selection, a brightness for the selected zones, and an explicit **Apply**
+button. It retains one authoritative raw vector of 49 `GRB` triples. Apply
+replaces only selected triples and preserves every other raw triple literally,
+then sends the complete vector and fixed `26 06` commit. Offline mode validates
+that transaction without opening hidraw.
 
 Without `--offline`, the sole target is resolved by HID_ID
 `0003:00001E71:00002023`. It validates the 150-byte descriptor, character
 device major:minor before and after open, rechecks HID_ID and descriptor, and
-requires one unambiguous CPU Package sensor below 85 C. It opens only that node
-with write-only nonblocking/no-follow flags, writes the two 512-byte frames
-3 ms apart, and stops without retry on every error. There are no controls for
-payloads, Report IDs, device paths, LED counts, Cooling, firmware, fans, or
-other opcodes.
+requires one unambiguous CPU Package sensor below 85 C. Before open it uses
+`lstat`, requires a directly-addressed character device, checks major:minor
+against sysfs, and checks write access. It opens only that node with
+write-only nonblocking/no-follow flags, writes the two 512-byte frames 3 ms
+apart, and stops without retry on every error. An in-process lock plus a
+nonblocking per-user advisory file lock prevents a second process from joining
+the data/commit transaction. The UI runs D32 extraction and all I/O in a Qt
+worker, and defers window closing until that transaction completes.
+
+The real mode requires a udev permission rule appropriate for **writing** the
+target hidraw node. Do not run the UI with `sudo` just to bypass this check.
+For an interactive desktop session, a constrained rule such as
+`SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2023", MODE="0660", TAG+="uaccess"`
+is the intended permission model. Inspect and install any system rule through
+the normal administrator workflow. There are no controls for payloads, Report
+IDs, device paths, LED counts, Cooling, firmware, fans, or other opcodes.
 
 `Restaurar D32` reads the private D32 PCAP at its fixed local path using
 `tshark`, extracts the final target frame read-only, and requires SHA-256
 `24a9fd2fbb05769c56505907506c186ba313baa0a277a2506ceb831e77573c70` before it
 can send it with the fixed commit. The PCAP is never included in Git. After a
-D32 restore the editor deliberately says that its prepared map is not the
-physical D32 state, since the original CAM RGB values cannot be honestly
-recovered from the raw vector.
+successful D32 restore, its exact raw vector becomes the prepared base. A later
+Apply replaces only its selected triples. The UI keeps prepared state, last
+successful send, and physically-confirmed state separate, and labels the last
+one as unknown because CAM RGB cannot be honestly recovered from raw triples.
 
 The per-zone candidate is explicitly a thesis:
 

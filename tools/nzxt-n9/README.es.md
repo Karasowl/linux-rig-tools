@@ -17,33 +17,56 @@ propósito, no el diseño final. El módulo de protocolo y modelo está separado
 del escritor del dispositivo y de la interfaz, así la interfaz definitiva
 podrá sustituir esta superficie sin reescribir el motor.
 
+Desde este checkout del repositorio, ejecuta directamente el laboratorio sin
+instalarlo:
+
 ```
-nzxt-n9-lab --offline
+cd tools/nzxt-n9
+./bin/nzxt-n9-lab --offline
 ```
+
+Requiere Python 3 y PyQt6. En CachyOS o Arch el paquete firmado de repositorio
+correspondiente es `python-pyqt6`. Este laboratorio no se conecta a propósito
+con `install.sh`, empaquetado ni un servicio del sistema.
 
 El modo offline es obligatorio para desarrollo y QA mecánico. Muestra el
 recorrido de 49 zonas, 1-17 por la izquierda, 18-34 por abajo y 35-49 por la
 derecha. Permite selección con clic y Ctrl+Clic, RGB hexadecimal o el selector
-Qt, brillo global y un botón explícito **Aplicar**. Aplicar siempre construye
-el vector completo de 49 zonas en `GRB` y el commit fijo `26 06`, pero offline
-los valida sin abrir hidraw.
+Qt, brillo para las zonas seleccionadas y un botón explícito **Aplicar**.
+Conserva un vector crudo autoritativo de 49 tripletes `GRB`. Aplicar reemplaza
+solo los tripletes seleccionados y conserva literalmente los demás, después
+envía el vector completo y el commit fijo `26 06`. Offline valida esa
+transacción sin abrir hidraw.
 
 Sin `--offline`, el único destino se resuelve por HID_ID
 `0003:00001E71:00002023`. Valida el descriptor de 150 bytes, major:minor del
 dispositivo de caracteres antes y después de abrir, vuelve a comprobar HID_ID
-y descriptor, y exige un único sensor CPU Package por debajo de 85 C. Abre
-solo ese nodo con flags de escritura, nonblocking y no-follow, escribe las dos
-tramas de 512 bytes con 3 ms entre ellas y no reintenta ante ningún error. No
-hay controles para payloads, Report ID, rutas, número de LEDs, Cooling,
-firmware, ventiladores ni otros opcodes.
+y descriptor, y exige un único sensor CPU Package por debajo de 85 C. Antes de
+abrir usa `lstat`, exige un dispositivo de caracteres directo, contrasta
+major:minor con sysfs y comprueba permiso de escritura. Abre solo ese nodo con
+flags de escritura, nonblocking y no-follow, escribe las dos tramas de 512
+bytes con 3 ms entre ellas y no reintenta ante ningún error. Un lock en proceso
+y un lock advisory no bloqueante por usuario impiden que otro proceso se meta
+en la transacción data/commit. La UI ejecuta la extracción D32 y todo I/O en un
+worker Qt, y difiere el cierre de ventana hasta acabar la transacción.
+
+El modo real requiere una regla udev con permiso de **escritura** para el nodo
+hidraw objetivo. No ejecutes la UI con `sudo` solo para saltar esta comprobación.
+Para una sesión de escritorio interactiva, una regla acotada como
+`SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2023", MODE="0660", TAG+="uaccess"`
+es el modelo de permisos previsto. Revisa e instala cualquier regla del sistema
+por el flujo normal de administración. No hay controles para payloads, Report
+ID, rutas, número de LEDs, Cooling, firmware, ventiladores ni otros opcodes.
 
 `Restaurar D32` lee el PCAP privado D32 en su ruta local fija mediante
 `tshark`, extrae de forma de solo lectura la trama final objetivo y exige el
 SHA-256 `24a9fd2fbb05769c56505907506c186ba313baa0a277a2506ceb831e77573c70`
 antes de enviarla con el commit fijo. El PCAP no se incluye nunca en Git. Tras
-restaurar D32 el editor declara que su mapa preparado no representa el estado
-físico D32, porque no se pueden recuperar honestamente los RGB originales de
-CAM a partir del vector crudo.
+una restauración D32 exitosa, su vector crudo exacto pasa a ser la base
+preparada. Un Aplicar posterior reemplaza solo sus tripletes seleccionados. La
+UI separa estado preparado, último envío exitoso y estado confirmado
+físicamente, que queda marcado como desconocido porque los RGB originales de
+CAM no se pueden recuperar honestamente del vector crudo.
 
 El candidato por zona se declara como tesis:
 

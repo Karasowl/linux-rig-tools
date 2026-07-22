@@ -1,26 +1,36 @@
 #!/usr/bin/env python3
-"""Deliberately utilitarian PyQt6 laboratory for N9 Fixed per-zone colours."""
+"""Utilitarian PyQt6 laboratory for NZXT N9 Fixed per-zone colour vectors."""
 from __future__ import annotations
 
 import argparse
 import sys
+from enum import Enum
 from pathlib import Path
 
 LIB = Path(__file__).resolve().parents[1] / "lib"
 sys.path.insert(0, str(LIB))
 
-from PyQt6.QtCore import QRegularExpression, QTimer, Qt
+from PyQt6.QtCore import QObject, QRegularExpression, QThread, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QRegularExpressionValidator
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QColorDialog,
-    QSlider, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QColorDialog, QFormLayout, QGridLayout, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QSlider,
+    QSpinBox, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from nzxt_n9_fixed import (
-    COMMIT_FRAME, D32_PCAP_PATH, N9FixedError, N9FixedWriter, OfflineWriter,
-    build_color_frame, extract_d32_frame, parse_hex_color, read_only_readiness,
+    N9FixedError, N9FixedWriter, OfflineWriter, Readiness, ZoneVector,
+    parse_hex_color, read_only_readiness, restore_d32_vector,
 )
+
+
+class DeviceState(Enum):
+    OFFLINE = "offline"
+    ABSENT = "dispositivo ausente"
+    THERMAL = "bloqueo térmico"
+    READY = "listo"
+    WRITING = "escribiendo"
+    ERROR = "error"
 
 
 class ZoneButton(QPushButton):
@@ -39,24 +49,70 @@ class ZoneButton(QPushButton):
         super().mousePressEvent(event)
 
 
+class OperationWorker(QObject):
+    """Owns all slow D32 extraction and writer calls outside the GUI thread."""
+    succeeded = pyqtSignal(str, object, str)
+    failed = pyqtSignal(str, str)
+
+    def __init__(self, operation: str, writer, vector: ZoneVector | None, d32_loader, readiness_reader) -> None:
+        super().__init__()
+        self.operation = operation
+        self.writer = writer
+        self.vector = vector
+        self.d32_loader = d32_loader
+        self.readiness_reader = readiness_reader
+
+    def run(self) -> None:
+        try:
+            if self.operation == "readiness":
+                readiness = self.readiness_reader()
+                self.succeeded.emit(self.operation, None, "%s, CPU Package %.1f C" % (readiness.node, readiness.temperature_c))
+                return
+            if self.operation == "d32":
+                loaded = self.d32_loader()
+                vector = ZoneVector.from_frame(loaded) if isinstance(loaded, bytes) else loaded
+            else:
+                if self.vector is None:
+                    raise N9FixedError("missing prepared zone vector")
+                vector = self.vector
+            result = self.writer.send_vector(vector)
+            self.succeeded.emit(self.operation, vector, str(result))
+        except Exception as exc:  # result is rendered safely by the GUI state machine
+            self.failed.emit(self.operation, str(exc))
+
+
 class FixedLabWindow(QMainWindow):
-    def __init__(self, offline: bool, *, writer=None, d32_loader=extract_d32_frame) -> None:
+    def __init__(
+        self,
+        offline: bool,
+        *,
+        writer=None,
+        d32_loader=restore_d32_vector,
+        readiness_reader=read_only_readiness,
+    ) -> None:
         super().__init__()
         self.offline = offline
         self.writer = writer if writer is not None else (OfflineWriter() if offline else N9FixedWriter())
         self.d32_loader = d32_loader
-        self.colors = [(255, 255, 255)] * 49
+        self.readiness_reader = readiness_reader
+        self.prepared_vector = ZoneVector.from_rgb([(255, 255, 255)] * 49, 25)
+        self.last_success_vector: ZoneVector | None = None
+        self.last_success_description = "ninguno"
+        self.physical_unknown = True
         self.selected: set[int] = set()
-        self.raw_d32_restored = False
+        self.device_state = DeviceState.OFFLINE if offline else DeviceState.ERROR
         self.busy = False
+        self._thread: QThread | None = None
+        self._worker: OperationWorker | None = None
+        self._closing_requested = False
         self.setWindowTitle("nzxt-n9-lab: Fixed per-zone laboratory")
-        self.resize(810, 620)
+        self.resize(850, 660)
         self._build_ui()
         self._update_ui()
         if offline:
-            self._log("Modo offline: no se abrirá hidraw.")
+            self._log("Modo offline: se validan vectores, nunca se abre hidraw.")
         else:
-            self._probe_real_readiness()
+            self._start_operation("readiness")
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -77,11 +133,11 @@ class FixedLabWindow(QMainWindow):
 
         panel = QVBoxLayout()
         self.device_label = QLabel()
-        self.state_label = QLabel()
+        self.outcome_label = QLabel()
         self.map_state_label = QLabel()
         self.map_state_label.setWordWrap(True)
         panel.addWidget(self.device_label)
-        panel.addWidget(self.state_label)
+        panel.addWidget(self.outcome_label)
         panel.addWidget(self.map_state_label)
 
         selection_row = QHBoxLayout()
@@ -99,7 +155,7 @@ class FixedLabWindow(QMainWindow):
         self.hex_input = QLineEdit("FFFFFF")
         self.hex_input.setMaxLength(6)
         self.hex_input.setValidator(QRegularExpressionValidator(QRegularExpression("[0-9A-Fa-f]{6}")))
-        self.hex_input.textChanged.connect(self._hex_changed)
+        self.hex_input.textChanged.connect(self._update_ui)
         color_row.addWidget(self.color_button)
         color_row.addWidget(self.hex_input)
         panel.addLayout(color_row)
@@ -113,19 +169,22 @@ class FixedLabWindow(QMainWindow):
         self.brightness_spin.setValue(25)
         self.brightness_slider.valueChanged.connect(self.brightness_spin.setValue)
         self.brightness_spin.valueChanged.connect(self.brightness_slider.setValue)
-        brightness_form.addRow("Brillo global", self.brightness_slider)
+        brightness_form.addRow("Brillo para zonas seleccionadas", self.brightness_slider)
         brightness_form.addRow("Porcentaje", self.brightness_spin)
         panel.addLayout(brightness_form)
 
         self.apply_button = QPushButton("Aplicar")
         self.restore_button = QPushButton("Restaurar D32")
+        self.check_button = QPushButton("Comprobar dispositivo")
         self.apply_button.clicked.connect(self._apply)
         self.restore_button.clicked.connect(self._restore_d32)
+        self.check_button.clicked.connect(lambda: self._start_operation("readiness"))
         panel.addWidget(self.apply_button)
         panel.addWidget(self.restore_button)
+        panel.addWidget(self.check_button)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
-        self.log.setMinimumHeight(160)
+        self.log.setMinimumHeight(170)
         panel.addWidget(QLabel("Registro"))
         panel.addWidget(self.log, 1)
         layout.addLayout(panel, 3)
@@ -134,58 +193,39 @@ class FixedLabWindow(QMainWindow):
     def _log(self, text: str) -> None:
         self.log.append(text)
 
-    def _probe_real_readiness(self) -> None:
-        """Read-only status for the visible device and temperature state."""
-        try:
-            details = read_only_readiness()
-        except N9FixedError as exc:
-            message = str(exc)
-            if "CPU Package" in message:
-                self.state_label.setText("Estado: temperatura no disponible o >=85 C")
-                self.device_label.setText("Dispositivo: no listo")
-            else:
-                self.state_label.setText("Estado: dispositivo ausente o no válido")
-                self.device_label.setText("Dispositivo: ausente")
-            self._log("Preflight read-only: %s" % message)
-        else:
-            self.device_label.setText("Dispositivo: %s" % details)
-            self.state_label.setText("Estado: listo")
-            self._log("Preflight read-only: %s" % details)
+    def _selection_text(self) -> str:
+        if not self.selected:
+            return "sin selección"
+        if len(self.selected) == 1:
+            return "selección simple"
+        if len(self.selected) == 49:
+            return "todas las zonas"
+        return "selección múltiple (%d)" % len(self.selected)
 
     def _zone_clicked(self, zone: int, multi: bool) -> None:
         if self.busy:
             return
         if multi:
-            if zone in self.selected:
-                self.selected.remove(zone)
-            else:
-                self.selected.add(zone)
+            self.selected.symmetric_difference_update({zone})
         else:
             self.selected = {zone}
-        self.state_label.clear()
         self._update_ui()
 
     def _select_all(self) -> None:
-        self.selected = set(range(49))
-        self.state_label.clear()
-        self._update_ui()
+        if not self.busy:
+            self.selected = set(range(49))
+            self._update_ui()
 
     def _clear_selection(self) -> None:
-        self.selected.clear()
-        self.state_label.clear()
-        self._update_ui()
+        if not self.busy:
+            self.selected.clear()
+            self._update_ui()
 
     def _choose_color(self) -> None:
-        text = self.hex_input.text()
-        initial = QColor("#" + text) if len(text) == 6 else QColor("#ffffff")
+        initial = QColor("#" + self.hex_input.text()) if self._hex_color() else QColor("#ffffff")
         color = QColorDialog.getColor(initial, self, "Elegir color RGB")
         if color.isValid():
             self.hex_input.setText(color.name(QColor.NameFormat.HexRgb)[1:].upper())
-
-    def _hex_changed(self, _text: str) -> None:
-        if not self.busy:
-            self.state_label.clear()
-        self._update_ui()
 
     def _hex_color(self):
         try:
@@ -193,101 +233,130 @@ class FixedLabWindow(QMainWindow):
         except ValueError:
             return None
 
-    def _operation(self, label: str, frame: bytes) -> None:
-        try:
-            result = self.writer.send(frame, COMMIT_FRAME)
-        except (N9FixedError, ValueError, OSError) as exc:
-            if "CPU Package" in str(exc):
-                self.state_label.setText("Estado: temperatura no disponible o >=85 C")
-            elif "N9 HID_ID" in str(exc) or "descriptor" in str(exc):
-                self.state_label.setText("Estado: dispositivo ausente o no válido")
-            else:
-                self.state_label.setText("Estado: error")
-            self._log("ERROR %s: %s" % (label, exc))
-        else:
-            self.state_label.setText("Estado: éxito")
-            self._log("ÉXITO %s: %s" % (label, result))
-        finally:
-            self.busy = False
-            self._update_ui()
+    def _can_write(self) -> bool:
+        return self.device_state in {DeviceState.OFFLINE, DeviceState.READY} and not self.busy
 
-    def _start_operation(self, label: str, frame: bytes) -> None:
+    def _start_operation(self, operation: str, vector: ZoneVector | None = None) -> bool:
+        if self.busy or self._thread is not None:
+            self._log("Operación rechazada: ya existe una operación en curso.")
+            return False
+        if operation != "readiness" and not self._can_write():
+            self._log("Operación rechazada: el dispositivo no está listo.")
+            return False
         self.busy = True
-        self.state_label.setText("Estado: escribiendo")
+        self.device_state = DeviceState.WRITING
+        self.outcome_label.setText("Última operación: escribiendo")
         self._update_ui()
-        QTimer.singleShot(0, lambda: self._operation(label, frame))
+        self._thread = QThread(self)
+        self._worker = OperationWorker(operation, self.writer, vector, self.d32_loader, self.readiness_reader)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.succeeded.connect(self._operation_succeeded)
+        self._worker.failed.connect(self._operation_failed)
+        self._worker.succeeded.connect(lambda *_args: self._thread.quit() if self._thread else None)
+        self._worker.failed.connect(lambda *_args: self._thread.quit() if self._thread else None)
+        self._thread.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread_finished)
+        self._thread.start()
+        return True
+
+    def _operation_succeeded(self, operation: str, vector: object, detail: str) -> None:
+        self.busy = False
+        if operation == "readiness":
+            self.device_state = DeviceState.READY
+            self.outcome_label.setText("Última comprobación: listo")
+            self._log("Preflight read-only: %s" % detail)
+        else:
+            assert isinstance(vector, ZoneVector)
+            self.prepared_vector = vector
+            self.last_success_vector = vector
+            self.last_success_description = "D32 exacto" if operation == "d32" else "Aplicar"
+            self.physical_unknown = True
+            self.device_state = DeviceState.OFFLINE if self.offline else DeviceState.READY
+            self.outcome_label.setText("Última operación: éxito (%s)" % self.last_success_description)
+            self._log("ÉXITO %s: %s" % (self.last_success_description, detail))
+        self._update_ui()
+
+    def _operation_failed(self, operation: str, message: str) -> None:
+        self.busy = False
+        if "CPU Package" in message:
+            self.device_state = DeviceState.THERMAL
+        elif "N9" in message or "descriptor" in message or "writable" in message:
+            self.device_state = DeviceState.ABSENT
+        else:
+            self.device_state = DeviceState.ERROR
+        self.outcome_label.setText("Última operación: error (%s)" % operation)
+        self._log("ERROR %s: %s" % (operation, message))
+        self._update_ui()
+
+    def _thread_finished(self) -> None:
+        self._worker = None
+        self._thread = None
+        if self._closing_requested:
+            self.close()
 
     def _apply(self) -> None:
         color = self._hex_color()
         if not self.selected:
-            self.state_label.setText("Estado: sin selección")
             self._log("No se envió nada: selecciona una o más zonas.")
             return
         if color is None:
-            self.state_label.setText("Estado: hex inválido")
             self._log("No se envió nada: RGB debe ser RRGGBB.")
             return
-        for index in self.selected:
-            self.colors[index] = color
-        self.raw_d32_restored = False
-        frame = build_color_frame(self.colors, self.brightness_spin.value())
-        self._start_operation("Aplicar 49 zonas", frame)
+        candidate = self.prepared_vector.with_rgb(self.selected, color, self.brightness_spin.value())
+        self.prepared_vector = candidate
+        self._start_operation("apply", candidate)
 
     def _restore_d32(self) -> None:
-        try:
-            frame = self.d32_loader()
-        except N9FixedError as exc:
-            self.state_label.setText("Estado: error D32")
-            self._log("ERROR restauración D32: %s" % exc)
-            return
-        self.raw_d32_restored = True
-        self._start_operation("Restauración D32 exacta", frame)
+        self._start_operation("d32")
 
     def _update_ui(self) -> None:
-        color = self._hex_color()
-        if self.busy:
-            state = "escribiendo"
-        elif color is None:
-            state = "hex inválido"
-        elif not self.selected:
-            state = "sin selección"
-        elif len(self.selected) == 1:
-            state = "selección simple"
-        elif len(self.selected) == 49:
-            state = "todas las zonas"
-        else:
-            state = "selección múltiple (%d)" % len(self.selected)
-        persistent = (
-            self.state_label.text().startswith("Estado: éxito")
-            or self.state_label.text().startswith("Estado: error")
-            or self.state_label.text().startswith("Estado: temperatura")
-            or self.state_label.text().startswith("Estado: dispositivo")
-        )
-        if not self.busy and not persistent:
-            self.state_label.setText("Estado: %s" % state)
-        if self.offline:
+        if self.device_state == DeviceState.OFFLINE:
             self.device_label.setText("Dispositivo: offline, cero escrituras")
+        elif self.device_state == DeviceState.READY:
+            self.device_label.setText("Dispositivo: listo")
+        elif self.device_state == DeviceState.ABSENT:
+            self.device_label.setText("Dispositivo: ausente o no válido")
+        elif self.device_state == DeviceState.THERMAL:
+            self.device_label.setText("Dispositivo: bloqueo térmico, temperatura no disponible o >=85 C")
+        elif self.device_state == DeviceState.WRITING:
+            self.device_label.setText("Dispositivo: escribiendo")
+        else:
+            self.device_label.setText("Dispositivo: error, requiere comprobación manual")
+        last = self.last_success_description if self.last_success_vector is not None else "ninguno"
+        physical = "desconocido, no confirmado físicamente" if self.physical_unknown else "no disponible"
         self.map_state_label.setText(
-            "Mapa: estado preparado, no representa el D32 físico restaurado." if self.raw_d32_restored
-            else "Mapa: estado local preparado, no enviado."
+            "Preparado: vector raw de 49 triples. Último envío exitoso: %s. Físico: %s. %s"
+            % (last, physical, self._selection_text())
         )
+        color_valid = self._hex_color() is not None
+        controls = not self.busy
+        apply_enabled = self._can_write() and bool(self.selected) and color_valid
         for index, button in enumerate(self.zone_buttons):
-            red, green, blue = self.colors[index]
+            red, green, blue = self.prepared_vector.display_rgb(index)
             selected = index in self.selected
             luminance = (red * 299 + green * 587 + blue * 114) / 1000
             foreground = "#000" if luminance > 150 else "#fff"
             border = "3px solid #ff9800" if selected else "1px solid #666"
             button.setStyleSheet("background:#%02x%02x%02x;color:%s;border:%s;" % (red, green, blue, foreground, border))
-            button.setEnabled(not self.busy)
-        enabled = not self.busy
-        self.all_button.setEnabled(enabled)
-        self.clear_button.setEnabled(enabled)
-        self.color_button.setEnabled(enabled)
-        self.hex_input.setEnabled(enabled)
-        self.brightness_slider.setEnabled(enabled)
-        self.brightness_spin.setEnabled(enabled)
-        self.apply_button.setEnabled(enabled)
-        self.restore_button.setEnabled(enabled)
+            button.setEnabled(controls)
+        self.all_button.setEnabled(controls)
+        self.clear_button.setEnabled(controls)
+        self.color_button.setEnabled(controls)
+        self.hex_input.setEnabled(controls)
+        self.brightness_slider.setEnabled(controls)
+        self.brightness_spin.setEnabled(controls)
+        self.apply_button.setEnabled(apply_enabled)
+        self.restore_button.setEnabled(self._can_write())
+        self.check_button.setEnabled(controls and not self.offline)
+
+    def closeEvent(self, event) -> None:  # noqa: N802, Qt API
+        if self._thread is not None:
+            self._closing_requested = True
+            self._log("Cierre diferido: se espera el final seguro de la operación actual.")
+            event.ignore()
+            return
+        event.accept()
 
 
 def main(argv: list[str] | None = None) -> int:

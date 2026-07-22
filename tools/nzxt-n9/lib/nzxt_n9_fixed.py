@@ -1,16 +1,20 @@
-"""Safe, narrowly-scoped transport for the NZXT N9 Fixed lab.
+"""Closed protocol, vector model and writer for the NZXT N9 Fixed lab.
 
-Only the capture-backed 0x26/0x04 colour vector and fixed 0x26/0x06 commit
-are implemented.  This module deliberately has no generic HID payload API.
+Only the capture-backed ``26 04`` 49-zone frame and the fixed ``26 06``
+commit exist here.  There is deliberately no public API for raw HID bytes.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import math
 import os
 import stat
 import subprocess
+import tempfile
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Final, Iterable
 
@@ -31,10 +35,14 @@ D32_PCAP_PATH: Final = Path(
 )
 SYSFS_HIDRAW_CLASS = Path("/sys/class/hidraw")
 DEV_DIR = Path("/dev")
+_PROCESS_WRITE_LOCK = threading.Lock()
 
 
 class N9FixedError(RuntimeError):
-    """A closed failure.  Callers must not retry a failed write automatically."""
+    """Closed failure.  The caller must not automatically retry it."""
+
+
+Rgb = tuple[int, int, int]
 
 
 def srgb_decode(value: float) -> float:
@@ -46,11 +54,7 @@ def srgb_encode(value: float) -> float:
 
 
 def component_byte(component: int, brightness: int) -> int:
-    """Per-zone candidate quantizer, scale 255, supported by D26-D32.
-
-    This is a thesis, not a claim about CAM internals.  The global model used
-    scale 254, so an uncaptured component can differ by plus or minus one.
-    """
+    """Per-zone scale-255 candidate, an explicit thesis rather than CAM fact."""
     if not isinstance(component, int) or not 0 <= component <= 255:
         raise ValueError("RGB component must be an integer from 0 to 255")
     if not isinstance(brightness, int) or not 0 <= brightness <= 100:
@@ -59,28 +63,69 @@ def component_byte(component: int, brightness: int) -> int:
     return math.floor(255 * srgb_encode(linear) + 0.422545474091919)
 
 
-def parse_hex_color(text: str) -> tuple[int, int, int]:
+def parse_hex_color(text: str) -> Rgb:
     text = text.strip().removeprefix("#")
-    if len(text) != 6 or any(c not in "0123456789abcdefABCDEF" for c in text):
+    if len(text) != 6 or any(char not in "0123456789abcdefABCDEF" for char in text):
         raise ValueError("color must be exactly six hexadecimal RGB digits")
     return tuple(int(text[offset : offset + 2], 16) for offset in (0, 2, 4))  # type: ignore[return-value]
 
 
-def build_color_frame(colors: Iterable[tuple[int, int, int]], brightness: int) -> bytes:
-    colors = list(colors)
-    if len(colors) != ZONE_COUNT:
-        raise ValueError("exactly 49 zones are required")
-    frame = bytearray(REPORT_LEN)
-    frame[:4] = LOAD_HEADER
-    for index, (red, green, blue) in enumerate(colors):
-        offset = 4 + index * 3
-        frame[offset : offset + 3] = bytes((
+@dataclass(frozen=True)
+class ZoneVector:
+    """Authoritative 49-zone raw GRB vector.
+
+    The raw triples are what gets sent.  RGB and brightness are used only when
+    replacing selected zones, so every unselected triple remains byte literal.
+    """
+
+    triples: tuple[bytes, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.triples) != ZONE_COUNT or any(len(triple) != 3 for triple in self.triples):
+            raise ValueError("ZoneVector requires exactly 49 three-byte GRB triples")
+
+    @classmethod
+    def from_rgb(cls, colors: Iterable[Rgb], brightness: int) -> "ZoneVector":
+        triples = []
+        for red, green, blue in colors:
+            triples.append(bytes((
+                component_byte(green, brightness),
+                component_byte(red, brightness),
+                component_byte(blue, brightness),
+            )))
+        return cls(tuple(triples))
+
+    @classmethod
+    def from_frame(cls, frame: bytes) -> "ZoneVector":
+        validate_color_frame(frame)
+        return cls(tuple(frame[4 + index * 3 : 7 + index * 3] for index in range(ZONE_COUNT)))
+
+    def with_rgb(self, selected: Iterable[int], color: Rgb, brightness: int) -> "ZoneVector":
+        selected = frozenset(selected)
+        if any(not isinstance(index, int) or not 0 <= index < ZONE_COUNT for index in selected):
+            raise ValueError("selected zone index is outside 0..48")
+        red, green, blue = color
+        replacement = bytes((
             component_byte(green, brightness),
             component_byte(red, brightness),
             component_byte(blue, brightness),
         ))
-    validate_color_frame(bytes(frame))
-    return bytes(frame)
+        return ZoneVector(tuple(replacement if index in selected else triple for index, triple in enumerate(self.triples)))
+
+    def to_frame(self) -> bytes:
+        frame = LOAD_HEADER + b"".join(self.triples) + bytes(REPORT_LEN - 4 - ZONE_COUNT * 3)
+        validate_color_frame(frame)
+        return frame
+
+    def display_rgb(self, index: int) -> Rgb:
+        """Raw GRB display proxy, not a claimed reconstruction of CAM RGB."""
+        green, red, blue = self.triples[index]
+        return red, green, blue
+
+
+def build_color_frame(colors: Iterable[Rgb], brightness: int) -> bytes:
+    """Compatibility helper.  New callers should retain a ZoneVector instead."""
+    return ZoneVector.from_rgb(colors, brightness).to_frame()
 
 
 def validate_color_frame(frame: bytes) -> None:
@@ -116,7 +161,7 @@ def _tshark_lines(pcap_path: Path) -> list[str]:
 
 
 def extract_d32_frame(pcap_path: Path = D32_PCAP_PATH, *, lines: Iterable[str] | None = None) -> bytes:
-    """Extract the final bus 3/address 7 D32 load frame without modifying it."""
+    """Read-only extraction of the final D32 target frame from its private PCAP."""
     candidate: bytes | None = None
     for line in _tshark_lines(pcap_path) if lines is None else lines:
         fields = line.split("\t")
@@ -130,14 +175,16 @@ def extract_d32_frame(pcap_path: Path = D32_PCAP_PATH, *, lines: Iterable[str] |
             candidate = frame
     if candidate is None:
         raise N9FixedError("D32 PCAP has no final target 26 04 frame")
-    try:
-        validate_color_frame(candidate)
-    except ValueError as exc:
-        raise N9FixedError("D32 frame failed shape validation: %s" % exc) from exc
+    validate_color_frame(candidate)
     digest = hashlib.sha256(candidate).hexdigest()
     if digest != D32_FRAME_SHA256:
         raise N9FixedError("D32 frame hash mismatch: %s" % digest)
     return candidate
+
+
+def restore_d32_vector(pcap_path: Path = D32_PCAP_PATH) -> ZoneVector:
+    """Public typed restoration API.  Raw extraction stays inside this module."""
+    return ZoneVector.from_frame(extract_d32_frame(pcap_path))
 
 
 def _hid_id(name: str) -> str | None:
@@ -151,7 +198,7 @@ def _hid_id(name: str) -> str | None:
 
 
 def resolve_hidraw() -> Path:
-    matches = [p.name for p in SYSFS_HIDRAW_CLASS.glob("hidraw*") if _hid_id(p.name) == TARGET_HID_ID]
+    matches = [path.name for path in SYSFS_HIDRAW_CLASS.glob("hidraw*") if _hid_id(path.name) == TARGET_HID_ID]
     if len(matches) != 1:
         raise N9FixedError("expected exactly one N9 HID_ID %s, found %d" % (TARGET_HID_ID, len(matches)))
     return DEV_DIR / matches[0]
@@ -174,6 +221,27 @@ def _sysfs_rdev(name: str) -> tuple[int, int]:
         raise N9FixedError("cannot validate N9 major:minor") from exc
 
 
+def _device_stat(node: Path, *, follow: bool) -> os.stat_result:
+    try:
+        return os.stat(node) if follow else os.lstat(node)
+    except OSError as exc:
+        raise N9FixedError("cannot stat N9 node %s" % node) from exc
+
+
+def _verify_node_before_open(node: Path) -> None:
+    info = _device_stat(node, follow=False)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISCHR(info.st_mode):
+        raise N9FixedError("resolved N9 node is not a direct character device")
+    actual = (os.major(info.st_rdev), os.minor(info.st_rdev))
+    if actual != _sysfs_rdev(node.name):
+        raise N9FixedError("resolved N9 node major:minor differs from sysfs")
+    if not os.access(node, os.W_OK):
+        raise N9FixedError("N9 node is not writable by this user")
+    if _hid_id(node.name) != TARGET_HID_ID:
+        raise N9FixedError("N9 HID_ID changed before open")
+    _descriptor_ok(node.name)
+
+
 def _open_flags() -> int:
     flags = os.O_WRONLY | os.O_NONBLOCK
     for name in ("O_CLOEXEC", "O_NOFOLLOW"):
@@ -185,10 +253,10 @@ def _verify_open_fd(fd: int, node: Path) -> None:
     info = os.fstat(fd)
     if not stat.S_ISCHR(info.st_mode):
         raise N9FixedError("resolved N9 node is no longer a character device")
-    expected = _sysfs_rdev(node.name)
-    actual = (os.major(info.st_rdev), os.minor(info.st_rdev))
-    if actual != expected or _hid_id(node.name) != TARGET_HID_ID:
+    if (os.major(info.st_rdev), os.minor(info.st_rdev)) != _sysfs_rdev(node.name):
         raise N9FixedError("N9 node identity changed after open")
+    if _hid_id(node.name) != TARGET_HID_ID:
+        raise N9FixedError("N9 HID_ID changed after open")
     _descriptor_ok(node.name)
 
 
@@ -209,56 +277,100 @@ def cpu_package_temperature_c() -> float:
     return readings[0]
 
 
-def read_only_readiness() -> str:
-    """Describe the real write preconditions without opening /dev/hidraw."""
+@dataclass(frozen=True)
+class Readiness:
+    node: Path
+    temperature_c: float
+
+
+def read_only_readiness(temperature_reader: Callable[[], float] = cpu_package_temperature_c) -> Readiness:
+    """Check a real target without opening hidraw."""
     node = resolve_hidraw()
-    _descriptor_ok(node.name)
-    temperature = cpu_package_temperature_c()
+    _verify_node_before_open(node)
+    temperature = temperature_reader()
     if temperature >= 85:
         raise N9FixedError("CPU Package is %.1f C, must be below 85 C" % temperature)
-    return "%s listo, CPU Package %.1f C" % (node, temperature)
+    return Readiness(node, temperature)
+
+
+class DeviceWriteLock:
+    """Nonblocking process and cross-process lock for the one fixed N9 target."""
+    def __init__(self) -> None:
+        runtime = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid()))
+        base = runtime if runtime.is_dir() else Path(tempfile.gettempdir())
+        self.path = base / "nzxt-n9-1e71-2023.lock"
+        self.fd = -1
+
+    def __enter__(self) -> "DeviceWriteLock":
+        if not _PROCESS_WRITE_LOCK.acquire(blocking=False):
+            raise N9FixedError("another N9 Fixed operation is already in progress")
+        try:
+            flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            self.fd = os.open(str(self.path), flags, 0o600)
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (OSError, BlockingIOError) as exc:
+            if self.fd >= 0:
+                os.close(self.fd)
+                self.fd = -1
+            _PROCESS_WRITE_LOCK.release()
+            raise N9FixedError("another process holds the N9 Fixed lock") from exc
+        return self
+
+    def __exit__(self, _type, _value, _traceback) -> None:
+        try:
+            if self.fd >= 0:
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+                os.close(self.fd)
+        finally:
+            self.fd = -1
+            _PROCESS_WRITE_LOCK.release()
 
 
 class N9FixedWriter:
-    """Real writer with a fully closed target and exact two-write transaction."""
-    def __init__(self, temperature_reader: Callable[[], float] = cpu_package_temperature_c) -> None:
+    """Typed real writer.  Its raw two-frame transaction remains private."""
+    def __init__(
+        self,
+        temperature_reader: Callable[[], float] = cpu_package_temperature_c,
+        lock_factory: Callable[[], DeviceWriteLock] = DeviceWriteLock,
+    ) -> None:
         self.temperature_reader = temperature_reader
+        self.lock_factory = lock_factory
 
-    def send(self, data: bytes, commit: bytes = COMMIT_FRAME) -> str:
-        validate_color_frame(data)
-        validate_commit_frame(commit)
-        temperature = self.temperature_reader()
-        if temperature >= 85:
-            raise N9FixedError("CPU Package is %.1f C, must be below 85 C" % temperature)
-        node = resolve_hidraw()
-        _descriptor_ok(node.name)
+    def send_vector(self, vector: ZoneVector) -> Readiness:
+        """Send one typed vector.  Any duplicate or failure is returned closed."""
+        data = vector.to_frame()
+        validate_commit_frame(COMMIT_FRAME)
+        with self.lock_factory():
+            readiness = read_only_readiness(self.temperature_reader)
+            self._send_frames(readiness.node, data, COMMIT_FRAME)
+        return readiness
+
+    def _send_frames(self, node: Path, data: bytes, commit: bytes) -> None:
+        """Exact private data, 3 ms gap, commit transaction.  Never retries."""
         try:
             fd = os.open(str(node), _open_flags())
         except OSError as exc:
             raise N9FixedError("cannot open N9 device: %s" % exc) from exc
         try:
             _verify_open_fd(fd, node)
-            written = os.write(fd, data)
-            if written != REPORT_LEN:
+            if os.write(fd, data) != REPORT_LEN:
                 raise N9FixedError("data write was partial, commit was not sent")
             time.sleep(COMMIT_GAP_S)
-            written = os.write(fd, commit)
-            if written != REPORT_LEN:
+            if os.write(fd, commit) != REPORT_LEN:
                 raise N9FixedError("commit write was partial")
         except OSError as exc:
             raise N9FixedError("N9 write failed without retry: %s" % exc) from exc
         finally:
             os.close(fd)
-        return "%s, CPU Package %.1f C" % (node, temperature)
 
 
 class OfflineWriter:
-    """Test and laboratory mode.  It validates only, and never opens hidraw."""
+    """Typed laboratory writer that validates frames and never opens hidraw."""
     def __init__(self) -> None:
-        self.sent: list[tuple[bytes, bytes]] = []
+        self.sent: list[ZoneVector] = []
 
-    def send(self, data: bytes, commit: bytes = COMMIT_FRAME) -> str:
-        validate_color_frame(data)
-        validate_commit_frame(commit)
-        self.sent.append((data, commit))
+    def send_vector(self, vector: ZoneVector) -> str:
+        validate_color_frame(vector.to_frame())
+        validate_commit_frame(COMMIT_FRAME)
+        self.sent.append(vector)
         return "offline validation, zero hidraw writes"
