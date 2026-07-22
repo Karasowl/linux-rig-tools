@@ -10,13 +10,13 @@ import unittest
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEvent, QThread, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
-from nzxt_n9_fixed import N9FixedError, OfflineWriter, Readiness, ZoneVector
+from nzxt_n9_fixed import FailureKind, N9FixedError, N9OperationError, OfflineWriter, Readiness, ZoneVector
 
 loader = importlib.machinery.SourceFileLoader("nzxt_n9_lab", str(ROOT / "bin" / "nzxt-n9-lab"))
 spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -71,7 +71,8 @@ class LabUiTests(unittest.TestCase):
         window._restore_d32()
         self.assertTrue(_wait_until(lambda: not window.busy))
         self.assertEqual(window.prepared_vector, d32)
-        self.assertEqual(window.last_success_vector, d32)
+        self.assertIsNone(window.last_success_vector)
+        self.assertEqual(window.last_offline_validation, d32)
         window._zone_clicked(3, False)
         window.hex_input.setText("FF0000")
         window._apply()
@@ -79,7 +80,42 @@ class LabUiTests(unittest.TestCase):
         self.assertEqual(writer.sent[-1].triples[3], bytes.fromhex("008900"))
         self.assertEqual(writer.sent[-1].triples[4], d32.triples[4])
         self.assertIn("Físico: desconocido", window.map_state_label.text())
-        self.assertIn("éxito", window.outcome_label.text())
+        self.assertIn("validación offline", window.outcome_label.text())
+        window.close()
+
+    def test_repeated_worker_cleanup_d32_error_and_lock_occupation(self) -> None:
+        window = lab.FixedLabWindow(True, writer=OfflineWriter())
+        window._zone_clicked(0, False)
+        for _ in range(4):
+            window._apply()
+            self.assertTrue(_wait_until(lambda: not window.busy))
+            QTest.qWait(10)
+            QApplication.processEvents()
+            QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            QApplication.processEvents()
+            self.assertFalse(window.findChildren(QThread))
+
+        failing_d32 = lab.FixedLabWindow(True, writer=OfflineWriter(), d32_loader=lambda: (_ for _ in ()).throw(N9FixedError("PCAP missing")))
+        failing_d32._zone_clicked(0, False)
+        failing_d32._restore_d32()
+        self.assertTrue(_wait_until(lambda: not failing_d32.busy))
+        self.assertEqual(failing_d32.device_state, lab.DeviceState.OFFLINE)
+        self.assertTrue(failing_d32.apply_button.isEnabled())
+        self.assertIn("d32-load", failing_d32.outcome_label.text())
+        failing_d32.close()
+
+        class BusyWriter:
+            def send_vector(self, _vector):
+                raise N9OperationError(FailureKind.LOCK_BUSY, "another process holds the N9 Fixed lock")
+
+        occupied = lab.FixedLabWindow(True, writer=BusyWriter())
+        occupied._zone_clicked(0, False)
+        occupied._apply()
+        self.assertTrue(_wait_until(lambda: not occupied.busy))
+        self.assertEqual(occupied.device_state, lab.DeviceState.OFFLINE)
+        self.assertTrue(occupied.apply_button.isEnabled())
+        self.assertIn("ocupación", occupied.outcome_label.text())
+        occupied.close()
         window.close()
 
     def test_real_state_controls_are_derived_from_readiness_and_errors(self) -> None:

@@ -36,7 +36,8 @@ Qt, brillo para las zonas seleccionadas y un botón explícito **Aplicar**.
 Conserva un vector crudo autoritativo de 49 tripletes `GRB`. Aplicar reemplaza
 solo los tripletes seleccionados y conserva literalmente los demás, después
 envía el vector completo y el commit fijo `26 06`. Offline valida esa
-transacción sin abrir hidraw.
+transacción sin abrir hidraw. Registra una **validación offline**, nunca un
+envío físico ni un resultado físico de iluminación.
 
 Sin `--offline`, el único destino se resuelve por HID_ID
 `0003:00001E71:00002023`. Valida el descriptor de 150 bytes, major:minor del
@@ -61,12 +62,13 @@ ID, rutas, número de LEDs, Cooling, firmware, ventiladores ni otros opcodes.
 `Restaurar D32` lee el PCAP privado D32 en su ruta local fija mediante
 `tshark`, extrae de forma de solo lectura la trama final objetivo y exige el
 SHA-256 `24a9fd2fbb05769c56505907506c186ba313baa0a277a2506ceb831e77573c70`
-antes de enviarla con el commit fijo. El PCAP no se incluye nunca en Git. Tras
-una restauración D32 exitosa, su vector crudo exacto pasa a ser la base
+antes de enviarla con el commit fijo en modo real. El PCAP no se incluye nunca
+en Git. Una ejecución D32 offline se etiqueta solo como validación. Tras una
+operación D32 exitosa, su vector crudo exacto pasa a ser la base
 preparada. Un Aplicar posterior reemplaza solo sus tripletes seleccionados. La
-UI separa estado preparado, último envío exitoso y estado confirmado
-físicamente, que queda marcado como desconocido porque los RGB originales de
-CAM no se pueden recuperar honestamente del vector crudo.
+UI separa estado preparado, último envío físico, validación offline y estado
+confirmado físicamente, que queda marcado como desconocido porque los RGB
+originales de CAM no se pueden recuperar honestamente del vector crudo.
 
 El candidato por zona se declara como tesis:
 
@@ -77,6 +79,10 @@ floor(255 * srgb_encode(srgb_decode(v / 255) * pct / 100) + 0.422545474091919)
 D26-D32 respaldan escala 255 mediante el valor `89` al 25%. En entradas no
 capturadas aún puede diferir por un byte del candidato global anterior de
 escala 254. No se presenta como un hecho sobre el algoritmo interno de CAM.
+
+La semántica de producto del **primer Aplicar parcial** antes de contar con una
+base cruda capturada o validada queda pendiente de una decisión explícita del
+operador. Esta corrección no la decide ni la amplía.
 
 ## Observaciones de iluminación de CAM
 

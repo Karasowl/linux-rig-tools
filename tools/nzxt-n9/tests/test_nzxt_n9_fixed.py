@@ -105,7 +105,9 @@ class WriterSafetyTests(unittest.TestCase):
     def test_offline_writer_never_opens_hardware(self) -> None:
         writer = fixed.OfflineWriter()
         with mock.patch.object(fixed.os, "open", side_effect=AssertionError("opened")):
-            self.assertIn("zero hidraw writes", writer.send_vector(self.vector))
+            result = writer.send_vector(self.vector)
+        self.assertFalse(result.physical)
+        self.assertIn("zero hidraw writes", result.detail)
         self.assertEqual(writer.sent, [self.vector])
 
     def test_temperature_abort_has_zero_preflight_opens_or_writes(self) -> None:
@@ -225,6 +227,8 @@ class LockTests(unittest.TestCase):
             finally:
                 process.terminate()
                 process.wait(timeout=2)
+                if process.stdout is not None:
+                    process.stdout.close()
 
 
 if __name__ == "__main__":

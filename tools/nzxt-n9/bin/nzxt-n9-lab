@@ -19,8 +19,9 @@ from PyQt6.QtWidgets import (
 )
 
 from nzxt_n9_fixed import (
-    N9FixedError, N9FixedWriter, OfflineWriter, Readiness, ZoneVector,
-    parse_hex_color, read_only_readiness, restore_d32_vector,
+    FailureKind, N9FixedError, N9FixedWriter, OfflineWriter, Readiness,
+    SendResult, ZoneVector, failure_kind, parse_hex_color, read_only_readiness,
+    restore_d32_vector,
 )
 
 
@@ -51,8 +52,8 @@ class ZoneButton(QPushButton):
 
 class OperationWorker(QObject):
     """Owns all slow D32 extraction and writer calls outside the GUI thread."""
-    succeeded = pyqtSignal(str, object, str)
-    failed = pyqtSignal(str, str)
+    succeeded = pyqtSignal(str, object, object)
+    failed = pyqtSignal(str, str, str)
 
     def __init__(self, operation: str, writer, vector: ZoneVector | None, d32_loader, readiness_reader) -> None:
         super().__init__()
@@ -66,19 +67,25 @@ class OperationWorker(QObject):
         try:
             if self.operation == "readiness":
                 readiness = self.readiness_reader()
-                self.succeeded.emit(self.operation, None, "%s, CPU Package %.1f C" % (readiness.node, readiness.temperature_c))
+                self.succeeded.emit(self.operation, None, SendResult(False, "%s, CPU Package %.1f C" % (readiness.node, readiness.temperature_c)))
                 return
             if self.operation == "d32":
-                loaded = self.d32_loader()
+                try:
+                    loaded = self.d32_loader()
+                except Exception as exc:
+                    self.failed.emit(self.operation, FailureKind.D32_LOAD.value, str(exc))
+                    return
                 vector = ZoneVector.from_frame(loaded) if isinstance(loaded, bytes) else loaded
             else:
                 if self.vector is None:
                     raise N9FixedError("missing prepared zone vector")
                 vector = self.vector
             result = self.writer.send_vector(vector)
-            self.succeeded.emit(self.operation, vector, str(result))
+            if isinstance(result, str):  # Compatibility for deliberately simple test fakes.
+                result = SendResult(False, result)
+            self.succeeded.emit(self.operation, vector, result)
         except Exception as exc:  # result is rendered safely by the GUI state machine
-            self.failed.emit(self.operation, str(exc))
+            self.failed.emit(self.operation, failure_kind(exc).value, str(exc))
 
 
 class FixedLabWindow(QMainWindow):
@@ -98,6 +105,8 @@ class FixedLabWindow(QMainWindow):
         self.prepared_vector = ZoneVector.from_rgb([(255, 255, 255)] * 49, 25)
         self.last_success_vector: ZoneVector | None = None
         self.last_success_description = "ninguno"
+        self.last_offline_validation: ZoneVector | None = None
+        self.last_offline_validation_description = "ninguna"
         self.physical_unknown = True
         self.selected: set[int] = set()
         self.device_state = DeviceState.OFFLINE if offline else DeviceState.ERROR
@@ -105,6 +114,7 @@ class FixedLabWindow(QMainWindow):
         self._thread: QThread | None = None
         self._worker: OperationWorker | None = None
         self._closing_requested = False
+        self._state_before_operation = self.device_state
         self.setWindowTitle("nzxt-n9-lab: Fixed per-zone laboratory")
         self.resize(850, 660)
         self._build_ui()
@@ -244,6 +254,7 @@ class FixedLabWindow(QMainWindow):
             self._log("Operación rechazada: el dispositivo no está listo.")
             return False
         self.busy = True
+        self._state_before_operation = self.device_state
         self.device_state = DeviceState.WRITING
         self.outcome_label.setText("Última operación: escribiendo")
         self._update_ui()
@@ -256,37 +267,54 @@ class FixedLabWindow(QMainWindow):
         self._worker.succeeded.connect(lambda *_args: self._thread.quit() if self._thread else None)
         self._worker.failed.connect(lambda *_args: self._thread.quit() if self._thread else None)
         self._thread.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
         self._thread.finished.connect(self._thread_finished)
         self._thread.start()
         return True
 
-    def _operation_succeeded(self, operation: str, vector: object, detail: str) -> None:
+    def _operation_succeeded(self, operation: str, vector: object, result: object) -> None:
         self.busy = False
+        assert isinstance(result, SendResult)
         if operation == "readiness":
             self.device_state = DeviceState.READY
             self.outcome_label.setText("Última comprobación: listo")
-            self._log("Preflight read-only: %s" % detail)
+            self._log("Preflight read-only: %s" % result.detail)
         else:
             assert isinstance(vector, ZoneVector)
             self.prepared_vector = vector
-            self.last_success_vector = vector
-            self.last_success_description = "D32 exacto" if operation == "d32" else "Aplicar"
             self.physical_unknown = True
             self.device_state = DeviceState.OFFLINE if self.offline else DeviceState.READY
-            self.outcome_label.setText("Última operación: éxito (%s)" % self.last_success_description)
-            self._log("ÉXITO %s: %s" % (self.last_success_description, detail))
+            description = "D32 exacto" if operation == "d32" else "Aplicar"
+            if result.physical:
+                self.last_success_vector = vector
+                self.last_success_description = description
+                self.outcome_label.setText("Último envío físico: éxito (%s)" % description)
+                self._log("ÉXITO FÍSICO %s: %s" % (description, result.detail))
+            else:
+                self.last_offline_validation = vector
+                self.last_offline_validation_description = description
+                self.outcome_label.setText("Última validación offline: éxito (%s)" % description)
+                self._log("VALIDACIÓN OFFLINE %s: %s" % (description, result.detail))
         self._update_ui()
 
-    def _operation_failed(self, operation: str, message: str) -> None:
+    def _operation_failed(self, operation: str, kind: str, message: str) -> None:
         self.busy = False
-        if "CPU Package" in message:
+        failure = FailureKind(kind)
+        if failure == FailureKind.D32_LOAD:
+            self.device_state = self._state_before_operation
+        elif failure == FailureKind.LOCK_BUSY:
+            self.device_state = self._state_before_operation
+        elif failure == FailureKind.THERMAL:
             self.device_state = DeviceState.THERMAL
-        elif "N9" in message or "descriptor" in message or "writable" in message:
+        elif failure == FailureKind.DEVICE:
             self.device_state = DeviceState.ABSENT
         else:
             self.device_state = DeviceState.ERROR
-        self.outcome_label.setText("Última operación: error (%s)" % operation)
-        self._log("ERROR %s: %s" % (operation, message))
+        if failure == FailureKind.LOCK_BUSY:
+            self.outcome_label.setText("Última operación: ocupación (%s)" % operation)
+        else:
+            self.outcome_label.setText("Última operación: error %s (%s)" % (kind, operation))
+        self._log("ERROR etapa=%s tipo=%s: %s" % (operation, kind, message))
         self._update_ui()
 
     def _thread_finished(self) -> None:
@@ -324,10 +352,12 @@ class FixedLabWindow(QMainWindow):
         else:
             self.device_label.setText("Dispositivo: error, requiere comprobación manual")
         last = self.last_success_description if self.last_success_vector is not None else "ninguno"
+        validation = self.last_offline_validation_description if self.last_offline_validation is not None else "ninguna"
         physical = "desconocido, no confirmado físicamente" if self.physical_unknown else "no disponible"
         self.map_state_label.setText(
-            "Preparado: vector raw de 49 triples. Último envío exitoso: %s. Físico: %s. %s"
-            % (last, physical, self._selection_text())
+            "Preparado: vector raw de 49 triples. Último envío físico: %s. "
+            "Última validación offline: %s. Físico: %s. %s"
+            % (last, validation, physical, self._selection_text())
         )
         color_valid = self._hex_color() is not None
         controls = not self.busy

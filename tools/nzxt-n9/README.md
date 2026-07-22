@@ -34,7 +34,8 @@ selection, a brightness for the selected zones, and an explicit **Apply**
 button. It retains one authoritative raw vector of 49 `GRB` triples. Apply
 replaces only selected triples and preserves every other raw triple literally,
 then sends the complete vector and fixed `26 06` commit. Offline mode validates
-that transaction without opening hidraw.
+that transaction without opening hidraw. It records an **offline validation**,
+never a physical send or a physical lighting result.
 
 Without `--offline`, the sole target is resolved by HID_ID
 `0003:00001E71:00002023`. It validates the 150-byte descriptor, character
@@ -60,10 +61,12 @@ IDs, device paths, LED counts, Cooling, firmware, fans, or other opcodes.
 `tshark`, extracts the final target frame read-only, and requires SHA-256
 `24a9fd2fbb05769c56505907506c186ba313baa0a277a2506ceb831e77573c70` before it
 can send it with the fixed commit. The PCAP is never included in Git. After a
-successful D32 restore, its exact raw vector becomes the prepared base. A later
+successful D32 operation, its exact raw vector becomes the prepared base. An
+offline D32 run is labeled validation only, never a physical send. A later
 Apply replaces only its selected triples. The UI keeps prepared state, last
-successful send, and physically-confirmed state separate, and labels the last
-one as unknown because CAM RGB cannot be honestly recovered from raw triples.
+physical send, offline validation, and physically-confirmed state separate, and
+labels the last one as unknown because CAM RGB cannot be honestly recovered
+from raw triples.
 
 The per-zone candidate is explicitly a thesis:
 
@@ -74,6 +77,10 @@ floor(255 * srgb_encode(srgb_decode(v / 255) * pct / 100) + 0.422545474091919)
 D26-D32 support scale 255 through the 25% `89` value. It can still differ by
 one byte from the earlier scale-254 global candidate at uncaptured inputs.
 This is not presented as a fact about CAM's internal algorithm.
+
+The product semantics of the **first partial Apply** before a captured or
+validated raw base is deliberately pending an explicit operator decision. This
+correction does not choose or extend that behavior.
 
 ## CAM lighting observations
 

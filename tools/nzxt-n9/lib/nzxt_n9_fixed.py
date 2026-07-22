@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Callable, Final, Iterable
 
@@ -40,6 +41,32 @@ _PROCESS_WRITE_LOCK = threading.Lock()
 
 class N9FixedError(RuntimeError):
     """Closed failure.  The caller must not automatically retry it."""
+
+
+class FailureKind(Enum):
+    D32_LOAD = "d32-load"
+    LOCK_BUSY = "lock-busy"
+    DEVICE = "device"
+    THERMAL = "thermal"
+    WRITE = "write"
+
+
+class N9OperationError(N9FixedError):
+    """Closed error with a machine-readable kind for the UI state machine."""
+    def __init__(self, kind: FailureKind, message: str) -> None:
+        super().__init__(message)
+        self.kind = kind
+
+
+def failure_kind(error: Exception) -> FailureKind:
+    if isinstance(error, N9OperationError):
+        return error.kind
+    message = str(error)
+    if "CPU Package" in message:
+        return FailureKind.THERMAL
+    if "N9" in message or "descriptor" in message or "writable" in message:
+        return FailureKind.DEVICE
+    return FailureKind.WRITE
 
 
 Rgb = tuple[int, int, int]
@@ -283,6 +310,13 @@ class Readiness:
     temperature_c: float
 
 
+@dataclass(frozen=True)
+class SendResult:
+    """Separates a physical HID transaction from an offline frame validation."""
+    physical: bool
+    detail: str
+
+
 def read_only_readiness(temperature_reader: Callable[[], float] = cpu_package_temperature_c) -> Readiness:
     """Check a real target without opening hidraw."""
     node = resolve_hidraw()
@@ -303,7 +337,7 @@ class DeviceWriteLock:
 
     def __enter__(self) -> "DeviceWriteLock":
         if not _PROCESS_WRITE_LOCK.acquire(blocking=False):
-            raise N9FixedError("another N9 Fixed operation is already in progress")
+            raise N9OperationError(FailureKind.LOCK_BUSY, "another N9 Fixed operation is already in progress")
         try:
             flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
             self.fd = os.open(str(self.path), flags, 0o600)
@@ -313,7 +347,7 @@ class DeviceWriteLock:
                 os.close(self.fd)
                 self.fd = -1
             _PROCESS_WRITE_LOCK.release()
-            raise N9FixedError("another process holds the N9 Fixed lock") from exc
+            raise N9OperationError(FailureKind.LOCK_BUSY, "another process holds the N9 Fixed lock") from exc
         return self
 
     def __exit__(self, _type, _value, _traceback) -> None:
@@ -336,14 +370,14 @@ class N9FixedWriter:
         self.temperature_reader = temperature_reader
         self.lock_factory = lock_factory
 
-    def send_vector(self, vector: ZoneVector) -> Readiness:
+    def send_vector(self, vector: ZoneVector) -> SendResult:
         """Send one typed vector.  Any duplicate or failure is returned closed."""
         data = vector.to_frame()
         validate_commit_frame(COMMIT_FRAME)
         with self.lock_factory():
             readiness = read_only_readiness(self.temperature_reader)
             self._send_frames(readiness.node, data, COMMIT_FRAME)
-        return readiness
+        return SendResult(True, "%s, CPU Package %.1f C" % (readiness.node, readiness.temperature_c))
 
     def _send_frames(self, node: Path, data: bytes, commit: bytes) -> None:
         """Exact private data, 3 ms gap, commit transaction.  Never retries."""
@@ -369,8 +403,8 @@ class OfflineWriter:
     def __init__(self) -> None:
         self.sent: list[ZoneVector] = []
 
-    def send_vector(self, vector: ZoneVector) -> str:
+    def send_vector(self, vector: ZoneVector) -> SendResult:
         validate_color_frame(vector.to_frame())
         validate_commit_frame(COMMIT_FRAME)
         self.sent.append(vector)
-        return "offline validation, zero hidraw writes"
+        return SendResult(False, "offline validation, zero hidraw writes")
