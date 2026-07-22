@@ -417,13 +417,43 @@ y 75 C, debajo del límite de 85 C.
 
 **Conclusión:** el modo `Fixed` global queda cubierto con evidencia suficiente
 para implementar en Linux cualquier color RGB y cualquier brillo entero de 0 a
-100. El codificador genérico ya existe offline. Todavía no existe una ruta
-genérica de escritura ni una interfaz visual, porque el arnés físico conserva
-solo tres estados congelados. La estructura de personalización por zonas ya
-está demostrada como un vector completo de 49 tripletas GRB. El recorrido de
-17 zonas izquierdas, 17 inferiores y 15 derechas tiene todos sus límites
-anclados. Aún falta validar la transformación de color y brillo por zona antes
-de exponer control arbitrario.
+100. La estructura de personalización por zonas está demostrada como un vector
+completo de 49 tripletas GRB. El recorrido de 17 zonas izquierdas, 17 inferiores
+y 15 derechas tiene todos sus límites anclados. La etapa posterior construyó y
+validó una ruta genérica de escritura y una interfaz provisional para probar
+ese vector desde Linux.
+
+### 14. Laboratorio visual Fixed completo en Linux
+
+**Hecho verificado el 21 de julio de 2026:** `tools/nzxt-n9/bin/nzxt-n9-lab`
+expone las 49 zonas en PyQt6, selección simple y múltiple, color RGB
+hexadecimal, brillo entero de 0 a 100, Aplicar explícito y restauración del
+vector D32. Es una superficie funcional deliberadamente provisional, no el
+diseño final de la aplicación.
+
+El escritor identifica únicamente `0003:00001E71:00002023`, valida descriptor,
+dispositivo de caracteres y major:minor antes y después de abrir, exige CPU
+Package por debajo de 85 C, serializa la transacción con locks locales y entre
+procesos y no reintenta escrituras parciales. La interfaz conserva un vector
+crudo autoritativo. El primer Apply físico exige las 49 zonas o D32, y los
+Apply parciales posteriores preservan literalmente las zonas no seleccionadas.
+Un fallo iniciado después del primer `os.write` invalida esa base.
+
+El checkpoint integrado en `master` pasó 59 pruebas con `ResourceWarning`
+tratado como error, compilación Python, arranque Qt offscreen y revisión
+independiente. En QA físico, D32 produjo el patrón multicolor esperado,
+`#0E50AD` al 25 por ciento produjo azul uniforme de inmediato y una aplicación
+posterior de `#FF0000` al 25 por ciento sobre la zona 1 cambió solo esa zona,
+conservando azules las otras 48. Ismael realizó además múltiples pruebas de
+color, brillo y selección y aceptó Fixed como completo. No se reportaron
+anomalías de refrigeración durante esta sesión.
+
+**Conclusión actual:** Fixed global y por zona ya tienen un controlador visual
+funcional en Linux. La tesis matemática por zona sigue siendo una inferencia
+que puede diferir un nivel de CAM en entradas no capturadas, pero el programa
+permite probar directamente esos casos sin volver a construir tramas a mano.
+Los efectos animados, Cooling, bomba y ventiladores permanecen fuera de este
+hito.
 
 ## Técnicas usadas y qué esperamos obtener de cada una
 
@@ -434,11 +464,11 @@ de exponer control arbitrario.
 | `usbmon`, tshark y PCAP | Observar bytes sin escribir desde Linux | Handshake, heartbeat y tramas de iluminación | Descubrir telemetría, canales, efectos y controles |
 | Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D32 con acciones aisladas | Reducir falsos positivos y establecer causalidad más fuerte |
 | Repetición byte por byte | Separar coincidencias de comportamiento reproducible | Repetición de brillo y colores mixtos | Tramas doradas para pruebas automáticas |
-| Pruebas discriminantes | Refutar fórmulas que coinciden por accidente | El modelo sobrevivió D22, D24 y una escritura física inédita D25. D26 a D32 aislaron estado y límites por zona | Diseñar la ruta genérica de escritura global y modelar color y brillo por zona |
+| Pruebas discriminantes | Refutar fórmulas que coinciden por accidente | El modelo sobrevivió D22, D24 y una escritura física inédita D25. D26 a D32 aislaron estado y límites por zona | Usar el laboratorio Fixed para detectar cruces que difieran de la tesis por zona |
 | Análisis del descriptor HID | Resolver formato y dirección de reportes | Report ID `0x26`, longitud 512 y ausencia de Feature reports | Construir escrituras con la forma correcta |
 | Análisis estático de CAM | Buscar nombres, PID, tablas y pistas no visibles en PCAP | Referencias N7 y N9, lógica nativa localizada | Acotar opcodes o transformaciones que las capturas no distinguen |
-| Codificación offline | Probar la implementación sin tocar hardware | Encoder compatible con 9 colores, 12 brillos, D22, D24 y D25 | Reutilizarlo en un controlador global con puertas de seguridad |
-| Revisión independiente | Intentar refutar hallazgos antes de integrarlos | Correcciones de telemetría, formato HID y documentación | Evitar que una inferencia de un solo análisis se convierta en driver |
+| Codificación offline | Probar la implementación sin tocar hardware | Encoder compatible con 9 colores, 12 brillos, D22, D24 y D25, más un laboratorio Fixed cubierto por 59 pruebas | Extender el mismo enfoque a cada modo siguiente |
+| Revisión independiente | Intentar refutar hallazgos antes de integrarlos | Correcciones de telemetría, formato HID, concurrencia, estado físico y documentación | Evitar que una inferencia de un solo análisis se convierta en driver |
 
 ## Modelo técnico actual del N9
 
@@ -459,13 +489,13 @@ de exponer control arbitrario.
 
 - Existe un camino coherente para construir la misma trama que CAM.
 - La herramienta actual puede leer sin escribir.
-- La herramienta actual puede generar bytes sin abrir el dispositivo.
+- La herramienta puede generar y validar bytes sin abrir el dispositivo en
+  modo offline.
 - Linux ya produjo y revirtió un cambio físico de iluminación fija.
 - Linux construyó y aplicó físicamente un color y brillo globales nunca
   capturados de CAM mediante el modelo unificado.
-- El protocolo de `Fixed` global está suficientemente cubierto para un
-  controlador de color RGB y brillo de 0 a 100. La escritura genérica y la
-  interfaz visual todavía no están implementadas.
+- El protocolo de `Fixed` global y por zona está cubierto por un controlador
+  visual provisional con color RGB, brillo de 0 a 100 y selección de 49 zonas.
 - La personalización usa la misma trama `26 04` como vector de 49 tripletas
   independientes. CAM transmite el vector completo aunque cambie una sola
   zona.
