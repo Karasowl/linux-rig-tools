@@ -78,9 +78,12 @@ D26-D32 support scale 255 through the 25% `89` value. It can still differ by
 one byte from the earlier scale-254 global candidate at uncaptured inputs.
 This is not presented as a fact about CAM's internal algorithm.
 
-The product semantics of the **first partial Apply** before a captured or
-validated raw base is deliberately pending an explicit operator decision. This
-correction does not choose or extend that behavior.
+In real mode, before a physical authoritative base exists, the first **Apply**
+is enabled only when all 49 zones are selected. A successful real Apply or D32
+restore establishes that vector as the physical base. Later partial Applies
+replace only selected triples and preserve the rest literally. Offline mode
+keeps partial simulation available but still reports validation, not a physical
+send.
 
 ## CAM lighting observations
 

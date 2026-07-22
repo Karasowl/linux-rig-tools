@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import QApplication
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
-from nzxt_n9_fixed import FailureKind, N9FixedError, N9OperationError, OfflineWriter, Readiness, ZoneVector
+from nzxt_n9_fixed import FailureKind, N9FixedError, N9OperationError, OfflineWriter, Readiness, SendResult, ZoneVector
 
 loader = importlib.machinery.SourceFileLoader("nzxt_n9_lab", str(ROOT / "bin" / "nzxt-n9-lab"))
 spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -123,6 +123,9 @@ class LabUiTests(unittest.TestCase):
         window = lab.FixedLabWindow(False, writer=OfflineWriter(), readiness_reader=ready)
         self.assertTrue(_wait_until(lambda: window.device_state == lab.DeviceState.READY))
         window._zone_clicked(0, False)
+        self.assertFalse(window.apply_button.isEnabled())
+        self.assertIn("primer Apply real requiere seleccionar las 49 zonas", window.map_state_label.text())
+        window._select_all()
         self.assertTrue(window.apply_button.isEnabled())
         window.close()
 
@@ -141,6 +144,72 @@ class LabUiTests(unittest.TestCase):
         self.assertFalse(missing.apply_button.isEnabled())
         self.assertIn("ausente", missing.device_label.text())
         missing.close()
+
+    def test_real_first_full_apply_and_d32_establish_physical_base(self) -> None:
+        ready = lambda: Readiness(Path("/dev/fake"), 42.0)
+        class PhysicalWriter:
+            def __init__(self) -> None:
+                self.vectors = []
+            def send_vector(self, vector):
+                self.vectors.append(vector)
+                return SendResult(True, "physical fake")
+
+        writer = PhysicalWriter()
+        window = lab.FixedLabWindow(False, writer=writer, readiness_reader=ready)
+        self.assertTrue(_wait_until(lambda: window.device_state == lab.DeviceState.READY))
+        initial = window.prepared_vector
+        window._zone_clicked(0, False)
+        window._apply()
+        self.assertFalse(window.busy)
+        self.assertIsNone(window.authoritative_base)
+        self.assertTrue(window.physical_unknown)
+        self.assertEqual(window.prepared_vector, initial)
+        self.assertIn("primer envío real requiere las 49 zonas", window.outcome_label.text())
+        window._select_all()
+        window.hex_input.setText("FF0000")
+        window._apply()
+        self.assertTrue(_wait_until(lambda: not window.busy))
+        base = writer.vectors[-1]
+        self.assertEqual(window.authoritative_base, base)
+        self.assertEqual(window.last_success_vector, base)
+        self.assertFalse(window.physical_unknown)
+        window._zone_clicked(3, False)
+        window.hex_input.setText("0E50AD")
+        self.assertTrue(window.apply_button.isEnabled())
+        window._apply()
+        self.assertTrue(_wait_until(lambda: not window.busy))
+        self.assertEqual(writer.vectors[-1].triples[3], bytes.fromhex("27045b"))
+        self.assertEqual(writer.vectors[-1].triples[4], base.triples[4])
+        window.close()
+
+        d32 = ZoneVector(tuple(bytes((index, 255 - index, index // 2)) for index in range(49)))
+        restored = lab.FixedLabWindow(False, writer=PhysicalWriter(), d32_loader=lambda: d32, readiness_reader=ready)
+        self.assertTrue(_wait_until(lambda: restored.device_state == lab.DeviceState.READY))
+        restored._restore_d32()
+        self.assertTrue(_wait_until(lambda: not restored.busy))
+        self.assertEqual(restored.authoritative_base, d32)
+        self.assertFalse(restored.physical_unknown)
+        restored._zone_clicked(1, False)
+        self.assertTrue(restored.apply_button.isEnabled())
+        restored.close()
+
+    def test_failed_first_full_apply_keeps_physical_state_unknown(self) -> None:
+        ready = lambda: Readiness(Path("/dev/fake"), 42.0)
+        class FailingWriter:
+            def send_vector(self, _vector):
+                raise N9FixedError("synthetic physical write failure")
+
+        window = lab.FixedLabWindow(False, writer=FailingWriter(), readiness_reader=ready)
+        self.assertTrue(_wait_until(lambda: window.device_state == lab.DeviceState.READY))
+        initial = window.prepared_vector
+        window._select_all()
+        window._apply()
+        self.assertTrue(_wait_until(lambda: not window.busy))
+        self.assertIsNone(window.authoritative_base)
+        self.assertTrue(window.physical_unknown)
+        self.assertEqual(window.prepared_vector, initial)
+        self.assertEqual(window.device_state, lab.DeviceState.ERROR)
+        window.close()
 
     def test_busy_rejects_duplicate_and_defers_close_until_transaction_finishes(self) -> None:
         started = threading.Event()

@@ -80,9 +80,12 @@ D26-D32 respaldan escala 255 mediante el valor `89` al 25%. En entradas no
 capturadas aún puede diferir por un byte del candidato global anterior de
 escala 254. No se presenta como un hecho sobre el algoritmo interno de CAM.
 
-La semántica de producto del **primer Aplicar parcial** antes de contar con una
-base cruda capturada o validada queda pendiente de una decisión explícita del
-operador. Esta corrección no la decide ni la amplía.
+En modo real, antes de que exista una base física autoritativa, el primer
+**Aplicar** solo se habilita cuando están seleccionadas las 49 zonas. Un
+Aplicar real exitoso o una restauración D32 exitosa establecen ese vector como
+base física. Los Aplicar parciales posteriores reemplazan solo los tripletes
+seleccionados y preservan literalmente el resto. Offline conserva la
+simulación parcial, pero sigue reportando validación y no un envío físico.
 
 ## Observaciones de iluminación de CAM
 

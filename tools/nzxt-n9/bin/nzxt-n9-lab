@@ -105,6 +105,7 @@ class FixedLabWindow(QMainWindow):
         self.prepared_vector = ZoneVector.from_rgb([(255, 255, 255)] * 49, 25)
         self.last_success_vector: ZoneVector | None = None
         self.last_success_description = "ninguno"
+        self.authoritative_base: ZoneVector | None = None
         self.last_offline_validation: ZoneVector | None = None
         self.last_offline_validation_description = "ninguna"
         self.physical_unknown = True
@@ -273,7 +274,6 @@ class FixedLabWindow(QMainWindow):
         return True
 
     def _operation_succeeded(self, operation: str, vector: object, result: object) -> None:
-        self.busy = False
         assert isinstance(result, SendResult)
         if operation == "readiness":
             self.device_state = DeviceState.READY
@@ -288,6 +288,8 @@ class FixedLabWindow(QMainWindow):
             if result.physical:
                 self.last_success_vector = vector
                 self.last_success_description = description
+                self.authoritative_base = vector
+                self.physical_unknown = False
                 self.outcome_label.setText("Último envío físico: éxito (%s)" % description)
                 self._log("ÉXITO FÍSICO %s: %s" % (description, result.detail))
             else:
@@ -298,7 +300,6 @@ class FixedLabWindow(QMainWindow):
         self._update_ui()
 
     def _operation_failed(self, operation: str, kind: str, message: str) -> None:
-        self.busy = False
         failure = FailureKind(kind)
         if failure == FailureKind.D32_LOAD:
             self.device_state = self._state_before_operation
@@ -320,6 +321,8 @@ class FixedLabWindow(QMainWindow):
     def _thread_finished(self) -> None:
         self._worker = None
         self._thread = None
+        self.busy = False
+        self._update_ui()
         if self._closing_requested:
             self.close()
 
@@ -331,8 +334,12 @@ class FixedLabWindow(QMainWindow):
         if color is None:
             self._log("No se envió nada: RGB debe ser RRGGBB.")
             return
+        if not self.offline and self.authoritative_base is None and len(self.selected) != 49:
+            self.outcome_label.setText("Apply bloqueado: el primer envío real requiere las 49 zonas.")
+            self._log("No se envió nada: sin base física, selecciona exactamente las 49 zonas para el primer Apply real.")
+            self._update_ui()
+            return
         candidate = self.prepared_vector.with_rgb(self.selected, color, self.brightness_spin.value())
-        self.prepared_vector = candidate
         self._start_operation("apply", candidate)
 
     def _restore_d32(self) -> None:
@@ -353,15 +360,21 @@ class FixedLabWindow(QMainWindow):
             self.device_label.setText("Dispositivo: error, requiere comprobación manual")
         last = self.last_success_description if self.last_success_vector is not None else "ninguno"
         validation = self.last_offline_validation_description if self.last_offline_validation is not None else "ninguna"
-        physical = "desconocido, no confirmado físicamente" if self.physical_unknown else "no disponible"
+        physical = "desconocido, no confirmado físicamente" if self.physical_unknown else "base física conocida"
+        base = (
+            "disponible, Apply parcial preserva los triples no seleccionados"
+            if self.authoritative_base is not None
+            else "no disponible, primer Apply real requiere seleccionar las 49 zonas"
+        )
         self.map_state_label.setText(
             "Preparado: vector raw de 49 triples. Último envío físico: %s. "
-            "Última validación offline: %s. Físico: %s. %s"
-            % (last, validation, physical, self._selection_text())
+            "Última validación offline: %s. Base: %s. Físico: %s. %s"
+            % (last, validation, base, physical, self._selection_text())
         )
         color_valid = self._hex_color() is not None
         controls = not self.busy
-        apply_enabled = self._can_write() and bool(self.selected) and color_valid
+        initial_real_allowed = self.offline or self.authoritative_base is not None or len(self.selected) == 49
+        apply_enabled = self._can_write() and bool(self.selected) and color_valid and initial_real_allowed
         for index, button in enumerate(self.zone_buttons):
             red, green, blue = self.prepared_vector.display_rgb(index)
             selected = index in self.selected
