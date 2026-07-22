@@ -171,8 +171,9 @@ class WriterSafetyTests(unittest.TestCase):
                      mock.patch.object(fixed.os, "write", side_effect=lambda _fd, data: writes.append(data) or results.pop(0)), \
                      mock.patch.object(fixed.os, "close"), \
                      mock.patch.object(fixed.time, "sleep"):
-                    with self.assertRaises(fixed.N9FixedError):
+                    with self.assertRaises(fixed.N9OperationError) as context:
                         writer.send_vector(self.vector)
+                self.assertEqual(context.exception.kind, fixed.FailureKind.WRITE)
                 self.assertEqual(len(writes), expected_writes)
 
     def test_post_open_identity_failure_has_zero_writes(self) -> None:

@@ -83,7 +83,10 @@ is enabled only when all 49 zones are selected. A successful real Apply or D32
 restore establishes that vector as the physical base. Later partial Applies
 replace only selected triples and preserve the rest literally. Offline mode
 keeps partial simulation available but still reports validation, not a physical
-send.
+send. A data or commit write failure invalidates the physical base because the
+hardware may have changed partially. The next real Apply again requires all 49
+zones or a successful D32 restore. Failures before the first write do not erase
+an already known base.
 
 ## CAM lighting observations
 

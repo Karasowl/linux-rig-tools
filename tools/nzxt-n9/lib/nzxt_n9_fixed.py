@@ -384,18 +384,31 @@ class N9FixedWriter:
         try:
             fd = os.open(str(node), _open_flags())
         except OSError as exc:
-            raise N9FixedError("cannot open N9 device: %s" % exc) from exc
+            raise N9OperationError(FailureKind.DEVICE, "cannot open N9 device: %s" % exc) from exc
+        write_attempted = False
         try:
             _verify_open_fd(fd, node)
-            if os.write(fd, data) != REPORT_LEN:
-                raise N9FixedError("data write was partial, commit was not sent")
+            try:
+                write_attempted = True
+                data_written = os.write(fd, data)
+            except OSError as exc:
+                raise N9OperationError(FailureKind.WRITE, "data write failed without retry: %s" % exc) from exc
+            if data_written != REPORT_LEN:
+                raise N9OperationError(FailureKind.WRITE, "data write was partial, commit was not sent")
             time.sleep(COMMIT_GAP_S)
-            if os.write(fd, commit) != REPORT_LEN:
-                raise N9FixedError("commit write was partial")
-        except OSError as exc:
-            raise N9FixedError("N9 write failed without retry: %s" % exc) from exc
+            try:
+                write_attempted = True
+                commit_written = os.write(fd, commit)
+            except OSError as exc:
+                raise N9OperationError(FailureKind.WRITE, "commit write failed without retry: %s" % exc) from exc
+            if commit_written != REPORT_LEN:
+                raise N9OperationError(FailureKind.WRITE, "commit write was partial")
         finally:
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError as exc:
+                kind = FailureKind.WRITE if write_attempted else FailureKind.DEVICE
+                raise N9OperationError(kind, "close after write attempt failed: %s" % exc) from exc
 
 
 class OfflineWriter:

@@ -211,6 +211,68 @@ class LabUiTests(unittest.TestCase):
         self.assertEqual(window.device_state, lab.DeviceState.ERROR)
         window.close()
 
+    def test_data_or_commit_write_failure_invalidates_existing_physical_base(self) -> None:
+        ready = lambda: Readiness(Path("/dev/fake"), 42.0)
+        for message in ("data write was partial, commit was not sent", "commit write was partial"):
+            with self.subTest(message=message):
+                class Writer:
+                    def __init__(self) -> None:
+                        self.calls = 0
+                    def send_vector(self, _vector):
+                        self.calls += 1
+                        if self.calls == 1:
+                            return SendResult(True, "physical fake")
+                        raise N9OperationError(FailureKind.WRITE, message)
+
+                writer = Writer()
+                window = lab.FixedLabWindow(False, writer=writer, readiness_reader=ready)
+                self.assertTrue(_wait_until(lambda: window.device_state == lab.DeviceState.READY))
+                window._select_all()
+                window._apply()
+                self.assertTrue(_wait_until(lambda: not window.busy))
+                base = window.authoritative_base
+                self.assertIsNotNone(base)
+                prepared = window.prepared_vector
+                window._zone_clicked(1, False)
+                window.hex_input.setText("0E50AD")
+                window._apply()
+                self.assertTrue(_wait_until(lambda: not window.busy))
+                self.assertIsNone(window.authoritative_base)
+                self.assertTrue(window.physical_unknown)
+                self.assertEqual(window.prepared_vector, prepared)
+                self.assertEqual(window.device_state, lab.DeviceState.ERROR)
+                self.assertTrue(window._start_operation("readiness"))
+                self.assertTrue(_wait_until(lambda: window.device_state == lab.DeviceState.READY and not window.busy))
+                self.assertFalse(window.apply_button.isEnabled())
+                window._select_all()
+                self.assertTrue(window.apply_button.isEnabled())
+                window.close()
+
+    def test_failure_before_first_write_keeps_known_base(self) -> None:
+        ready = lambda: Readiness(Path("/dev/fake"), 42.0)
+        class DeviceFailureWriter:
+            def __init__(self) -> None:
+                self.calls = 0
+            def send_vector(self, _vector):
+                self.calls += 1
+                if self.calls == 1:
+                    return SendResult(True, "physical fake")
+                raise N9OperationError(FailureKind.DEVICE, "post-open descriptor changed before first write")
+
+        window = lab.FixedLabWindow(False, writer=DeviceFailureWriter(), readiness_reader=ready)
+        self.assertTrue(_wait_until(lambda: window.device_state == lab.DeviceState.READY))
+        window._select_all()
+        window._apply()
+        self.assertTrue(_wait_until(lambda: not window.busy))
+        base = window.authoritative_base
+        window._zone_clicked(1, False)
+        window._apply()
+        self.assertTrue(_wait_until(lambda: not window.busy))
+        self.assertEqual(window.authoritative_base, base)
+        self.assertFalse(window.physical_unknown)
+        self.assertEqual(window.device_state, lab.DeviceState.ABSENT)
+        window.close()
+
     def test_busy_rejects_duplicate_and_defers_close_until_transaction_finishes(self) -> None:
         started = threading.Event()
         release = threading.Event()

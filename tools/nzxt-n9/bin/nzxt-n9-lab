@@ -309,6 +309,13 @@ class FixedLabWindow(QMainWindow):
             self.device_state = DeviceState.THERMAL
         elif failure == FailureKind.DEVICE:
             self.device_state = DeviceState.ABSENT
+        elif failure == FailureKind.WRITE:
+            # A data or commit write may have changed hardware only partially.
+            # Keep the local prepared vector for recovery, but never call its
+            # previous physical base authoritative after this point.
+            self.authoritative_base = None
+            self.physical_unknown = True
+            self.device_state = DeviceState.ERROR
         else:
             self.device_state = DeviceState.ERROR
         if failure == FailureKind.LOCK_BUSY:

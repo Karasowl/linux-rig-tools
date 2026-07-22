@@ -86,6 +86,10 @@ Aplicar real exitoso o una restauración D32 exitosa establecen ese vector como
 base física. Los Aplicar parciales posteriores reemplazan solo los tripletes
 seleccionados y preservan literalmente el resto. Offline conserva la
 simulación parcial, pero sigue reportando validación y no un envío físico.
+Un fallo de escritura de datos o commit invalida la base física porque el
+hardware pudo cambiar parcialmente. El siguiente Aplicar real vuelve a exigir
+las 49 zonas o una restauración D32 exitosa. Los fallos antes de la primera
+escritura no eliminan una base ya conocida.
 
 ## Observaciones de iluminación de CAM
 
