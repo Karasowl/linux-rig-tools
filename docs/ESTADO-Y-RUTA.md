@@ -197,14 +197,17 @@ demostrar escritura real sin empezar por ventiladores, bomba o firmware.
 - D27 demostró que el primer rectángulo superior izquierdo corresponde a la
   primera tripleta. Al elegir rojo, solo esa tripleta cambió de `00 00 89` a
   `00 89 00` y las otras 48 quedaron idénticas.
+- D28 a D32 fijaron los otros límites del recorrido. Los índices 17, 18, 34,
+  35 y 49 cambiaron individualmente de `89 89 89` a `00 89 00`, sin alterar
+  ninguna otra tripleta.
 
 **Lo que sigue siendo inferencia o desconocido:**
 
 - Las 49 tripletas corresponden a 49 rectángulos controlables de la cubierta,
   pero no prueban que cada rectángulo represente un único LED físico.
-- Solo la correspondencia exacta del primer rectángulo está demostrada. El
-  recorrido completo de 17, 17 y 15 tiene evidencia visual fuerte, pero faltan
-  anclas controladas para probar las otras 48 posiciones.
+- Los seis extremos y cambios de tramo están demostrados. Los rectángulos
+  intermedios no se probaron uno por uno. Su numeración se deriva de los conteos
+  contiguos de 17, 17 y 15 y de sus extremos anclados.
 - `20 00` todavía no tiene una semántica demostrada.
 - La interfaz de CAM decía Canal 6, pero no se ha demostrado dónde se codifica
   el canal.
@@ -417,9 +420,10 @@ para implementar en Linux cualquier color RGB y cualquier brillo entero de 0 a
 100. El codificador genérico ya existe offline. Todavía no existe una ruta
 genérica de escritura ni una interfaz visual, porque el arnés físico conserva
 solo tres estados congelados. La estructura de personalización por zonas ya
-está demostrada como un vector completo de 49 tripletas GRB y la primera zona
-está mapeada exactamente. Aún falta validar anclas del recorrido completo y la
-transformación de color y brillo por zona antes de exponer control arbitrario.
+está demostrada como un vector completo de 49 tripletas GRB. El recorrido de
+17 zonas izquierdas, 17 inferiores y 15 derechas tiene todos sus límites
+anclados. Aún falta validar la transformación de color y brillo por zona antes
+de exponer control arbitrario.
 
 ## Técnicas usadas y qué esperamos obtener de cada una
 
@@ -428,9 +432,9 @@ transformación de color y brillo por zona antes de exponer control arbitrario.
 | Inventario con sysfs, `lsusb`, hidraw y sensores | Identificar el hardware real y sus límites | VID, PID, interfaces y ausencia de PWM Linux | Detección estable sin depender de números de bus o hidraw |
 | QEMU/KVM y passthrough USB | Ejecutar las aplicaciones oficiales contra el hardware real | Laboratorio Windows reproducible | Capturar Cooling, efectos y dispositivos restantes |
 | `usbmon`, tshark y PCAP | Observar bytes sin escribir desde Linux | Handshake, heartbeat y tramas de iluminación | Descubrir telemetría, canales, efectos y controles |
-| Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D27 con acciones aisladas | Reducir falsos positivos y establecer causalidad más fuerte |
+| Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D32 con acciones aisladas | Reducir falsos positivos y establecer causalidad más fuerte |
 | Repetición byte por byte | Separar coincidencias de comportamiento reproducible | Repetición de brillo y colores mixtos | Tramas doradas para pruebas automáticas |
-| Pruebas discriminantes | Refutar fórmulas que coinciden por accidente | El modelo sobrevivió D22, D24 y una escritura física inédita D25. D26 y D27 aislaron estado y posición por zona | Diseñar la ruta genérica de escritura global y completar anclas por zona |
+| Pruebas discriminantes | Refutar fórmulas que coinciden por accidente | El modelo sobrevivió D22, D24 y una escritura física inédita D25. D26 a D32 aislaron estado y límites por zona | Diseñar la ruta genérica de escritura global y modelar color y brillo por zona |
 | Análisis del descriptor HID | Resolver formato y dirección de reportes | Report ID `0x26`, longitud 512 y ausencia de Feature reports | Construir escrituras con la forma correcta |
 | Análisis estático de CAM | Buscar nombres, PID, tablas y pistas no visibles en PCAP | Referencias N7 y N9, lógica nativa localizada | Acotar opcodes o transformaciones que las capturas no distinguen |
 | Codificación offline | Probar la implementación sin tocar hardware | Encoder compatible con 9 colores, 12 brillos, D22, D24 y D25 | Reutilizarlo en un controlador global con puertas de seguridad |
@@ -465,9 +469,11 @@ transformación de color y brillo por zona antes de exponer control arbitrario.
 - La personalización usa la misma trama `26 04` como vector de 49 tripletas
   independientes. CAM transmite el vector completo aunque cambie una sola
   zona.
-- El primer rectángulo superior izquierdo es la tripleta 1. El recorrido de
-  17 zonas izquierdas, 17 inferiores y 15 derechas está fuertemente respaldado,
-  pero todavía no demostrado posición por posición.
+- Los límites 1, 17, 18, 34, 35 y 49 están demostrados mediante cambios
+  diferenciales. El recorrido resultante es 17 zonas izquierdas de arriba a
+  abajo, 17 inferiores de izquierda a derecha y 15 derechas de arriba a abajo.
+- Los rectángulos intermedios siguen el recorrido contiguo contado en CAM, pero
+  no recibieron 43 capturas individuales.
 - La superficie observada son zonas integradas de la cubierta de la N9. Los
   aros de ventiladores y la RAM no cambiaron durante la prueba.
 - No se ha capturado la página Cooling, por lo que no conocemos RPM,
@@ -612,7 +618,7 @@ ventiladores de la placa.
 | Dos dueños del USB al mismo tiempo | Estados incoherentes, desconexión o pérdida de capturas | Confirmar si el dispositivo pertenece a Linux o a la VM antes de cada prueba |
 | Confundir correlación con causalidad | Implementar campos o fórmulas falsos | Una acción por captura, repeticiones, pruebas discriminantes y etiquetas de evidencia |
 | Sobreajustar una fórmula de brillo | Colores incorrectos fuera de los puntos medidos | Marcar extrapolaciones, capturar otro brillo y conservar tramas doradas |
-| Asumir que 49 tripletas son 49 LED | Mapeo físico incorrecto | Tratar las 49 entradas como zonas visuales. D27 prueba la primera y todavía se requieren anclas para el resto antes de exponer control completo |
+| Asumir que 49 tripletas son 49 LED | Mapeo físico incorrecto | Tratar las 49 entradas como zonas visuales. D27 a D32 anclan los límites, pero no demuestran un LED eléctrico por rectángulo |
 | Pérdida temporal de iluminación | RGB apagado hasta recuperar estado | Mantener trama de reversión, registrar estado previo y usar reinicio completo como recuperación de último recurso ya observada |
 | Automatización visual frágil en la VM | Capturas de una superficie equivocada o acciones no verificadas | Verificar la pantalla real, usar rótulos actuales y reservar al humano los gestos visualmente ambiguos |
 | Guest Agent desconectado | Imposibilidad de automatizar o inspeccionar Windows | Recuperar el agente antes de una unidad dependiente, usar visor gráfico y no fingir que la VM está operable |
@@ -633,14 +639,13 @@ tramas congeladas, sin parámetros libres y sin empaquetado de sistema. No se
 debe ampliar a Cooling, firmware, duty ni curvas sin capturas nuevas y
 supervisión física.
 
-La siguiente unidad de iluminación es completar el mapa por zonas con el menor
-número de anclas discriminantes. El punto inicial ya está fijado. Conviene
-capturar al menos el final de la columna izquierda, los dos extremos del tramo
-horizontal y los dos extremos de la columna derecha. Después se debe comprobar
-si el modelo global de color y brillo puede reutilizarse o si la ruta por zonas
-emplea una cuantización distinta, como sugiere la diferencia `89` frente a
-`88` al 25 por ciento. Solo entonces corresponde construir el editor visual de
-49 zonas en Linux.
+La siguiente unidad de iluminación es comprobar si el modelo global de color y
+brillo puede reutilizarse por zona o si la personalización emplea una
+cuantización distinta, como sugiere la diferencia `89` frente a `88` al 25 por
+ciento. El mapa de 49 zonas ya tiene sus seis límites anclados. Ahora conviene
+capturar un color personalizado no binario en una sola zona y después el mismo
+color con un cambio exacto de brillo. Solo entonces corresponde construir el
+editor visual de 49 zonas en Linux.
 
 ## Artefactos principales
 

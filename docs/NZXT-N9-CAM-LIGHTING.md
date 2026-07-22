@@ -46,7 +46,7 @@ These are appearance reports, not calibrated output values.
 
 Enabling `Customize LED colors` disables the global color selector and displays a board map with 49 individually selectable rectangles. The map is visually confusing because white rectangles blend into the board drawing and CAM initially outlines only the selected rectangle. Deliberate inspection found 17 rectangles down the left edge, 17 across the lower horizontal edge, and 15 down the right edge. Clicking any rectangle opens the same preset and custom color palette.
 
-Turning customization off restores the global `Fixed` state. Turning it on restores a separate saved per-zone state rather than copying the current global color. D26 and D27 below establish the transmitted vector structure and the first exact rectangle-to-triple correspondence. The full order of the remaining 48 rectangles is strongly supported but not yet proven one by one.
+Turning customization off restores the global `Fixed` state. Turning it on restores a separate saved per-zone state rather than copying the current global color. D26 through D32 below establish the transmitted vector structure and anchor every boundary of the observed `17 + 17 + 15` traversal. The intermediate rectangles were not clicked one by one, so their exact indices follow from the counted contiguous runs and anchored endpoints rather than 49 separate differential captures.
 
 ## CAM state reapplied after USB reconnection
 
@@ -461,10 +461,47 @@ rectangle of the left edge maps to triple 1, confirms per-zone red as
 49-zone vector when one rectangle changes.
 
 The result supports the `17 + 17 + 15` traversal and the shared `26 04` frame
-format. It does not yet prove each of the remaining 48 rectangle mappings or a
-general color and brightness encoder for customized zones. In particular, the
-`89` level must not be replaced with the global model's `88` without further
-evidence.
+format. D27 by itself does not prove each of the remaining 48 rectangle
+mappings or a general color and brightness encoder for customized zones. In
+particular, the `89` level must not be replaced with the global model's `88`
+without further evidence.
+
+## D28 through D32 per-zone boundary anchors
+
+Five additional controlled captures changed one white customized rectangle to
+the same pure red preset while preserving the accumulated state from the prior
+capture. Each PCAP contains exactly one 512-byte `26 04 20 00` frame, one fixed
+`26 06` commit, and successful USB completions. In every comparison, only the
+expected triple changed from `89 89 89` to `00 89 00`. The other 48 triples,
+header, 361 zero padding bytes, and commit were byte-for-byte identical.
+
+| Series | Human-selected rectangle | Proven one-based triple | PCAP SHA-256 |
+| --- | --- | ---: | --- |
+| D27 | Top of left vertical edge | 1 | `00e2369f901b9fe3ae34a252e4301b0f39c1478a8f25a3707dc79d4bfc69f139` |
+| D28 | Bottom of left vertical edge | 17 | `512fba013f19b11aaa11e44e34ec2c878b2c2786782798c7719bdc7d868e5355` |
+| D29 | Left end of lower horizontal edge | 18 | `31c990af16339f2979f108d87b81438468337ed8219c23b614ec51832a93a122` |
+| D30 | Right end of lower horizontal edge | 34 | `2986ce8e82355aafa9fabc64df5ac299ec69dc8635cd717dd6eeed4849ada002` |
+| D31 | Top of right vertical edge | 35 | `e72dea4cb584af474887c63b3a8cfcee788a161fe6767b79a7a47a85420cbe0a` |
+| D32 | Bottom of right vertical edge | 49 | `fdf9940301e64c78ec70fe009f153af7a9a9c7fd59f6cc85ed2dc8a8a766d4a4` |
+
+The anchors prove these boundaries and directions:
+
+- Triples 1 through 17 traverse the left edge from top to bottom.
+- Triples 18 through 34 traverse the lower horizontal edge from left to right.
+- Triples 35 through 49 traverse the right edge from top to bottom.
+
+This is sufficient engineering evidence for a 49-zone layout model because
+the operator counted the matching number of contiguous rectangles in each run,
+D26's saved multicolor pattern aligned with the proposed groups, and every
+group boundary was then isolated by a differential capture. It is not 49
+independent physical clicks, and it does not prove that each visual rectangle
+contains exactly one electrical LED.
+
+All six red selections at 25 percent used `00 89 00`. This confirms a stable
+per-zone preset value in the tested state, but it does not resolve why global
+white at 25 percent measured `88 88 88` while customized white and full red use
+level `89`. A per-zone arbitrary color and brightness model still requires
+controlled custom-color and brightness captures.
 
 ## Supervised Linux write and restoration
 
