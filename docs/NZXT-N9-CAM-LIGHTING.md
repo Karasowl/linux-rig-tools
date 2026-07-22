@@ -44,7 +44,9 @@ This provides a repeatable, non-dragging method for exact tests:
 
 These are appearance reports, not calibrated output values.
 
-Enabling `Customize LED colors` disabled the global color selector and displayed a board map. During this exploration, only one clearly selectable region was found, near the upper edge. Setting it red changed only that region while the rest retained the previous global color. Turning the switch off restored the previous global color. More selectable regions remain **unknown** and need a deliberate map.
+Enabling `Customize LED colors` disables the global color selector and displays a board map with 49 individually selectable rectangles. The map is visually confusing because white rectangles blend into the board drawing and CAM initially outlines only the selected rectangle. Deliberate inspection found 17 rectangles down the left edge, 17 across the lower horizontal edge, and 15 down the right edge. Clicking any rectangle opens the same preset and custom color palette.
+
+Turning customization off restores the global `Fixed` state. Turning it on restores a separate saved per-zone state rather than copying the current global color. D26 and D27 below establish the transmitted vector structure and the first exact rectangle-to-triple correspondence. The full order of the remaining 48 rectangles is strongly supported but not yet proven one by one.
 
 ## CAM state reapplied after USB reconnection
 
@@ -391,6 +393,78 @@ sufficient engineering evidence to implement a Linux global `Fixed` controller
 with arbitrary RGB input and integer brightness from 0 through 100. It does not
 prove CAM's internal algorithm and does not cover per-zone or per-LED `Fixed`
 customization.
+
+## D26 saved per-zone state restoration
+
+**Reported controlled observation:** CAM began in global `Fixed` with
+`#0E50AD`, brightness 25 percent, and per-zone customization disabled. During
+one isolated capture, the operator enabled per-zone customization once. CAM
+immediately displayed a multicolor pattern that had been created during earlier
+manual exploration. The operator could not identify every saved color, so the
+observation is limited to the visible pattern rather than an invented list of
+49 colors. All fans continued spinning normally.
+
+**Verified from PCAP:** D26 contains exactly one 512-byte `26 04 20 00` write
+and one fixed `26 06` commit 2.034 ms later. Both USB completions have status 0.
+The data frame contains 49 GRB triples and 361 zero padding bytes. Its payload
+SHA-256 is
+`7496a9fefdcd3938df19afb1fd4439187c10dda206b4ba9a31ce6098a216a736`.
+The PCAP SHA-256 is
+`11f5bdf243f958d35b822f7fe256c3b95bc22e24aa07d3a14eedf80bda881c5f`.
+
+Forty-three triples are `89 89 89`. The six distinct positions are:
+
+| One-based index | GRB triple |
+| ---: | --- |
+| 1 | `00 00 89` |
+| 3 | `00 00 89` |
+| 4 | `7a 89 00` |
+| 5 | `32 89 89` |
+| 12 | `53 1d 13` |
+| 40 | `00 89 27` |
+
+The five distinct positions within indices 1 through 17 match the five colored
+segments visible on the left vertical edge. All indices 18 through 34 are
+uniform and match the visually uniform lower horizontal edge. Index 40 is the
+sixth position within the proposed 35 through 49 group and matches the single
+colored segment visible on the right vertical edge. This strongly supports the
+physical traversal `17 left + 17 lower + 15 right`, but D26 alone does not prove
+every rectangle-to-index correspondence.
+
+D26 contains no `27 04 5b` triple from the preceding global `#0E50AD` state.
+Therefore the customization toggle restored a separate complete 49-zone state.
+The capture does not determine whether CAM stored that state in its profile, a
+cache, or the device. The common customized value `89` is also one level above
+the global white value `88` measured at 25 percent in D8. The cause of this
+difference remains unknown.
+
+## D27 first per-zone rectangle changed to red
+
+**Reported controlled observation:** with the D26 state intact and
+customization still enabled, the first rectangle at the top of the left edge
+was selected and its palette was opened outside capture. During D27 the operator
+clicked only the pure red preset in the first column of the second palette row.
+The operator confirmed that the fans continued spinning normally.
+
+**Verified from PCAP:** D27 contains exactly one 512-byte `26 04 20 00` write
+and one fixed `26 06` commit 2.967 ms later. Both USB completions have status 0.
+The data payload SHA-256 is
+`6e8c6c383e75b2a72d21edbcee8265f4e050ac82585f9fe5e3e990153fbf1d41`.
+The PCAP SHA-256 is
+`00e2369f901b9fe3ae34a252e4301b0f39c1478a8f25a3707dc79d4bfc69f139`.
+
+Compared byte for byte with D26, only offsets 5 and 6 differ. The first triple
+changes from `00 00 89` to `00 89 00`. The other 48 triples, header, zero
+padding, and complete commit remain identical. This proves that the first top
+rectangle of the left edge maps to triple 1, confirms per-zone red as
+`00 89 00` in this saved 25 percent state, and shows that CAM sends the complete
+49-zone vector when one rectangle changes.
+
+The result supports the `17 + 17 + 15` traversal and the shared `26 04` frame
+format. It does not yet prove each of the remaining 48 rectangle mappings or a
+general color and brightness encoder for customized zones. In particular, the
+`89` level must not be replaced with the global model's `88` without further
+evidence.
 
 ## Supervised Linux write and restoration
 
