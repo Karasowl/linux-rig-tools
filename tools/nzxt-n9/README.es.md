@@ -132,40 +132,92 @@ familia de candidatos. Este es un intervalo de compatibilidad ajustado, no
 una fórmula confirmada. Estas capturas no prueban un triplete por LED, no
 confirman un índice de canal ni establecen una semántica segura de escritura.
 
-## Modos animados: primeros hallazgos (Spectrum Wave)
+## Modos animados: observaciones decodificadas (D35 a D46)
 
-La serie de capturas D35 a D38 (21 y 22 de julio de 2026) aisló
-`Spectrum Wave` con una sola acción humana por ventana. Verificado en los
-PCAPs: cada acción produjo exactamente una trama interrupt OUT de 512 bytes
-que comienza `2a 04 20 20`, **sin commit `26 06`** y sin más escrituras del
-host después (hasta 174 s de silencio observado mientras la animación seguía
-corriendo). El controlador confirmó cada trama con el eco `ff 01` conocido del
-opcode `2a 04`. El operador confirmó que el arcoíris arrancó, se aceleró de
-forma visible con el paso de velocidad y se invirtió con el cambio de
-dirección, con todos los ventiladores normales durante la serie. La captura de
-repetición reprodujo la primera trama byte por byte.
+La serie D35 a D38 (21 y 22 de julio de 2026) aisló `Spectrum Wave` con una
+sola acción humana por ventana. La campaña D39 a D46 (22 de julio de 2026)
+enumeró después todos los modos de iluminación restantes de CAM y decodificó
+los primeros campos, con selecciones en lote atribuibles y capturas dirigidas
+de una variable. Todo lo siguiente está verificado en los PCAPs archivados
+salvo que se etiquete otra cosa, para esta placa, CAM 4.76.5 y el Canal 6.
 
-Conclusión verificada para esta placa, CAM 4.76.5 y el Canal 6: la animación
-la genera el firmware del controlador. CAM envía una única trama de
-configuración por acción del usuario y no transmite frames de animación en
-este modo.
+**Tres patrones de transporte observados, verificados** (no es una
+clasificación completa: `Monitor Temperature` no transmitió nada en su
+ventana y su patrón sigue siendo desconocido):
 
-Campos observados, clasificados por evidencia:
+1. **Efectos de firmware** (catorce modos): una trama de configuración
+   `2a 04` de 512 bytes por acción del usuario, **sin commit `26 06`** y sin
+   más tráfico del host (hasta 174 s de silencio observado mientras la
+   animación seguía corriendo). El controlador confirma cada trama con el
+   eco `ff 01` del opcode.
+2. **Efectos de la familia `26`** (`Marquee`, `Wave`): sin trama `2a`. Cada
+   acción envía el vector GRB `26 04` al estilo de `Fixed` más un **commit
+   `26 06` parametrizado** 2 a 3 ms después: el byte 4 vale `02` (Fixed usa
+   `01`) y el byte 5 selecciona el efecto, `29` Marquee y `35` Wave (`00`
+   Fixed). El tamaño de LED de Marquee es el número de tripletas encendidas
+   al inicio del vector (un paso de tamaño pasó de 3 a 4). Los demás
+   parámetros del commit son **desconocidos**.
+3. **Streaming del host** (`Audio Bass`, `Audio Level`): sin trama de
+   configuración. CAM emite tramas `26 14` (cabecera `26 14 20 20`, 49
+   tripletas) cada 32 ms aproximados, siguiendo el audio, sin commit,
+   durante todo el resto de la captura (la salida del modo no se capturó).
+   El controlador acusó cada trama cuya ventana de acuse quedó dentro de la
+   captura y su heartbeat `ff 03` se detuvo mientras el flujo estuvo activo.
 
-- El byte 4 `02` como identificador del modo `Spectrum Wave` es una
-  **inferencia** hasta capturar un segundo modo animado.
-- El byte 5 está ligado a la velocidad (**verificado** como el único byte que
-  cambió con un paso de velocidad): `fa` (250) para `Normal`, `96` (150) para
-  `Fast`. Que menor sea más rápido es una **inferencia** con dos puntos, y el
-  ancho del campo (1 o 2 bytes) es **desconocido**.
-- El byte 55 está ligado a la dirección (**verificado** como el único byte que
-  cambió con un cambio de dirección): `00` derecha, `02` izquierda. La razón
-  de esa codificación es **desconocida**.
-- Los bytes 58 y 59 llevan la constante `31 03`. Significado **desconocido**.
+**Identificadores de modo** (byte 4 de `2a 04`), todos medidos en tráfico.
+Los modos marcados con * se capturaron en una sola ventana y siguen siendo
+observaciones únicas:
 
-Son observaciones de decodificación, no una especificación segura de
-escritura. No existe ni se autoriza desde ellas una ruta de escritura de modos
-animados. Los detalles están en
+| `01` Fading* | `02` Spectrum Wave | `04` Covering Marquee* | `05` Alternating |
+|---|---|---|---|
+| `06` Pulse* | `07` Breathing | `08` Candle* | `09` Starry Night* |
+| `0b` Rainbow Flow* | `0c` Super Rainbow* | `0d` Rainbow Pulse* | `0e` Tai Chi* |
+| `0f` Water Cooler* | `10` Loading* | | |
+
+`03` y `0a` no aparecieron nunca. Marquee y Wave no tienen identificador `2a`.
+
+Campos decodificados de `2a 04`, clasificados por evidencia:
+
+- Byte 4, identificador de modo: **verificado** con catorce constantes
+  distintas que siguen el orden anunciado de selección en cuatro ventanas
+  independientes.
+- Bytes 5 y 6, velocidad: **verificado** uint16 little endian (el `Normal`
+  de Alternating es 500), menor es más rápido (**verificado** con los
+  extremos de Breathing, `Slowest` 40, `Normal` 20 y `Fastest` 4, más la
+  aceleración observada en D36). La escala es **por modo**, así que un valor
+  no significa nada sin su modo. Los rangos de los demás modos no están
+  capturados.
+- Bytes 8 en adelante, lista de colores: **verificado** que son entradas
+  contiguas de 3 bytes en **orden R B G** (el rojo puro entró como
+  `89 00 00` y el azul puro como `00 89 00` al 25 por ciento), el orden
+  inverso al G R B de Fixed. El byte 56 es el contador de entradas y al
+  eliminar una entrada la lista se compacta. El brillo va **horneado en las
+  entradas** (un paso de brillo reescribió solo los bytes de color), con el
+  nivel de componente pleno igual al nivel por zona de Fixed al 25 por
+  ciento. El cuantizador exacto es **desconocido**.
+- Byte 55, campo de bits: el bit 1 es la dirección, **verificado en dos
+  modos** (Spectrum Wave de `00` a `02`, Alternating de `01` a `03`). El
+  bit 0 como interruptor de movimiento es una **hipótesis** pendiente de una
+  captura dedicada del toggle, y Starry Night llevó `01` sin exponer ese
+  interruptor.
+- Bytes 3, 7 (Candle llevó `56`), 57 y 58 a 59 (`31 03`, pero `31 04` en
+  Alternating): significado **desconocido**.
+
+`Monitor Temperature` tiene un **resultado negativo verificado**: elegirlo
+junto a su fuente de CPU no transmitió ninguna trama en dos ventanas
+separadas (la placa conservó visiblemente el efecto anterior). El fallo está
+en CAM antes de la capa USB, probablemente ligado a las fuentes de
+temperatura virtualizadas (**inferencia**). Su patrón de transporte es
+**desconocido** y el reintento queda pendiente.
+
+Implicación para Linux, como dirección de ingeniería y no como
+especificación: los modos de audio no pueden reproducirse con una escritura
+única. Necesitarían un demonio que transmita tramas `26 14` con cadencia de
+unos 30 ms. El mismo opcode es una ruta candidata para efectos propios en
+tiempo real sobre las 49 zonas renderizados en el host. Nada de esto autoriza
+escrituras: ninguna trama `2a 04`, `26 06` parametrizada o `26 14` es todavía
+una especificación segura de escritura. Los detalles y la evidencia por
+captura están en
 [Observaciones de iluminación de NZXT CAM](../../docs/NZXT-N9-CAM-LIGHTING.md).
 
 ## Dispositivo

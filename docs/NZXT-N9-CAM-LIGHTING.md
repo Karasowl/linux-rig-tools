@@ -632,6 +632,198 @@ These captures decode observations only. They do not establish a safe write
 specification for animated modes, and no `2a 04` frame should be written to
 the device from them.
 
+## USB observations from D39 through D46, animated-mode campaign
+
+**Method.** Eight isolated captures on 2026-07-22 completed the enumeration of
+CAM's lighting modes and the first field decoding for Channel 6. D39 through
+D42 were batch captures: the operator selected the announced modes in order
+with pauses longer than 12 seconds and touched no other control, so each write
+is attributed by announced order and timestamp. D43 through D45 were targeted
+single-variable captures (color list, LED size and direction, brightness and
+speed extremes). D46 was an exploratory window with a negative result. In
+every capture the N9 `1e71:2023` was device 7 on usbmon bus 3, target traffic
+was isolated by exact device address, every host write completed with status
+0, and the controller answered each write within 3 ms with the known `ff 01`
+acknowledgment echoing the opcode at bytes 14 and 15. Verification for this
+section was re-run against the archived PCAPs (SHA-256 checked against the
+capture sidecars) by the decoding worker.
+
+**Verified: three observed transport patterns.** The captured modes used
+three distinct write patterns, all through 512-byte interrupt OUT reports.
+This is not a complete classification of the lighting surface: `Monitor
+Temperature` transmitted nothing in its window and its transport pattern
+remains **unknown**.
+
+| Pattern | Frames | Modes observed |
+| --- | --- | --- |
+| Single `2a 04` configuration frame, no commit | 1 per user action | Spectrum Wave, Breathing, Fading, Covering Marquee, Pulse, Super Rainbow, Rainbow Flow, Rainbow Pulse, Water Cooler, Loading, Alternating, Tai Chi, Starry Night, Candle |
+| `26 04` data vector plus parameterized `26 06` commit | 2 per user action, 2-3 ms apart | `Fixed` (constant commit), Marquee and Wave (parameterized commit) |
+| `26 14` streaming, no configuration frame and no commit | continuous, about every 32 ms | Audio Bass, Audio Level |
+
+### Mode identifier table (byte 4 of the `2a 04` frame)
+
+All identifiers below were measured in traffic. Modes captured in one window
+remain single observations. The speed column is the little-endian uint16 at
+bytes 5 and 6 as transmitted, which is CAM's remembered per-mode speed state,
+with UI labels noted only where the operator confirmed them.
+
+| Mode | ID | Windows observed | Speed seen | Colors (byte 56) | Byte 55 | Byte 57 | Bytes 58-59 |
+| --- | ---: | --- | --- | ---: | --- | --- | --- |
+| `Fading` | `01` | 1 (D39) | 40 | 3 | `00` | `08` | `31 03` |
+| `Spectrum Wave` | `02` | 4 (D35-D38) | 250 `Normal`, 150 `Fast` | 0 | `00` right, `02` left | `00` | `31 03` |
+| `Covering Marquee` | `04` | 1 (D39) | 150 | 2 | `00` | `00` | `31 03` |
+| `Alternating` | `05` | 2 (D41, D44) | 500 `Normal` | 2 | `01`, `03` after direction change | `00` | `31 04` |
+| `Pulse` | `06` | 1 (D39) | 15 | 1 | `00` | `08` | `31 03` |
+| `Breathing` | `07` | 3 (D39, D43, D45) | 40 `Slowest`, 20 `Normal`, 4 `Fastest` | 1 to 3 | `00` | `08` | `31 03` |
+| `Candle` | `08` | 1 (D41) | 50 | 1 | `00` | `00` | `31 03` |
+| `Starry Night` | `09` | 1 (D41) | 15 | 1 | `01` | `00` | `31 03` |
+| `Rainbow Flow` | `0b` | 1 (D40) | 250 | 0 | `00` | `00` | `31 03` |
+| `Super Rainbow` | `0c` | 1 (D40) | 150 | 0 | `00` | `00` | `31 03` |
+| `Rainbow Pulse` | `0d` | 1 (D40) | 250 | 0 | `00` | `00` | `31 03` |
+| `Tai Chi` | `0e` | 1 (D41) | 30 | 2 | `00` | `05` | `31 03` |
+| `Water Cooler` | `0f` | 1 (D40) | 30 | 2 | `00` | `05` | `31 03` |
+| `Loading` | `10` | 1 (D40) | 10 | 1 | `00` | `04` | `31 03` |
+
+`Marquee` and `Wave` do not use the `2a` family, so no `2a` identifier exists
+for them in any capture. The values `03` and `0a` never appeared at byte 4.
+Whether the firmware reserves them (for example for the two `26`-family
+effects) is **unknown**. Byte 4 as the mode identifier, an inference after
+D35-D38, is now **verified** for the fourteen modes above: fourteen distinct
+constants that follow the announced selection order across four independent
+windows.
+
+### Field map of the `2a 04` frame
+
+- Bytes 0-2 `2a 04 20`: as in D35-D38. The `20` at byte 2 matching the
+  `Fixed` channel-selector position remains an **inference**.
+- Byte 3 `20`: constant in every `2a` frame. `Fixed` carries `00` here and
+  the `26 14` stream carries `20`. Meaning **unknown**.
+- Byte 4: mode identifier, **verified** (table above).
+- Bytes 5-6: speed, **verified** as a little-endian uint16. Alternating's
+  `Normal` measured `f4 01` (500), which does not fit one byte. Lower is
+  faster, **verified** by the Breathing extremes (`Slowest` 40, `Normal` 20,
+  `Fastest` 4) plus the D36 physical acceleration. The scale is per mode
+  (Breathing 40 to 4, Spectrum Wave 250 and 150, Alternating 500), so a speed
+  value is meaningless without its mode. Full ranges for modes other than
+  Breathing are **unknown**.
+- Byte 7: `00` in every frame except Candle, which carried `56` (86).
+  Meaning **unknown**. Candle exposes no speed control in the UI yet its
+  frame still carried 50 at bytes 5-6, also unexplained.
+- Bytes 8 through 8+3N-1: color list, **verified** as contiguous 3-byte
+  entries in **R B G order**. D43 anchored the order with controlled
+  additions: pure red `#FF0000` entered as `89 00 00` and pure blue
+  `#0000FF` as `00 89 00` at 25 percent brightness. This is the reverse
+  anchor of `Fixed`'s G R B. Removing an entry compacts the list,
+  **verified** in D43 (deleting the middle color shifted blue into its
+  slot). Entries beyond the third (the UI suggests up to 8) are uncaptured,
+  so their offsets are an extrapolation.
+- Brightness: **verified baked into the color entries**, not a separate
+  field. One brightness step (25 to 26 percent) rewrote `27 3e 00` to
+  `28 40 00` and `00 89 00` to `00 8b 00` and changed nothing else (D45).
+  The full-component level `89` at 25 percent equals the per-zone `Fixed`
+  level measured in D26-D32. The exact quantizer for the `2a` list is
+  **unknown**, compatible with but not proven equal to the Fixed family.
+- Byte 55: bit field. Bit 1 is direction, **verified in two modes**
+  (Spectrum Wave `00` to `02` in D37, Alternating `01` to `03` in D44, the
+  only byte changed in both). Bit 0 as "movement switch on" is a
+  **hypothesis** awaiting the dedicated D47 toggle capture. Caution: Starry
+  Night also carried `01` although its UI exposes no movement switch, so
+  bit 0 may mean something else per mode.
+- Byte 56: color count, **verified** (measured 0 through 3, follows the
+  list length exactly, including after a deletion).
+- Byte 57: per-mode constant (`08` for Breathing, Fading and Pulse, `05`
+  for Tai Chi and Water Cooler, `04` for Loading, `00` elsewhere). Meaning
+  **unknown**.
+- Bytes 58-59: `31 03` in every mode except Alternating, which carries
+  `31 04`. The D35-D38 reading of a constant is corrected: byte 59 varies
+  by mode. Meaning of both bytes **unknown**. `0x31` is still 49 decimal,
+  still only a suggestive coincidence.
+
+### Marquee and Wave: the `26 04` plus parameterized `26 06` family
+
+**Verified from D39, D41 and D44:** selecting `Marquee` or `Wave` transmits
+no `2a` frame. Each sends the familiar `26 04 20 00` data vector followed
+2-3 ms later by a `26 06` commit whose bytes 4-5 are parameterized:
+
+- `Fixed` commit (constant, all D1-D32 captures): `26 06 20 00 01 00 00 31 00 00 80 00 32 00 00 01`.
+- `Marquee` commit: same frame with byte 4 `02` and byte 5 `29`.
+- `Wave` commit: same frame with byte 4 `02` and byte 5 `35`.
+
+Byte 5 therefore selects the effect for the `26`-family (`29` Marquee, `35`
+Wave, `00` Fixed), and byte 4 distinguishes the parameterized form (`02`)
+from the Fixed form (`01`). Both **verified** in traffic, each effect
+selector in two windows for Marquee (D39, D44) and one for Wave (D41). The
+remaining commit bytes (`31` at 7, `80` at 10, `32` at 12, `01` at 15) are
+identical in all variants and their meaning is **unknown**.
+
+- Marquee's data vector carried its one color as GRB triples, `00 27 3e`
+  (the same stored purple that the `2a` list carries as `27 3e 00` in RBG),
+  in only the **first N** of the 49 slots, the rest zero. The **LED size
+  control is N**: one size step changed the vector from 3 to 4 lit triples
+  with no other byte change and a byte-identical commit (D44, **verified**
+  for that one step). The mapping of the full size scale to N is
+  **unknown**.
+- Wave's data vector carried all 49 triples as `89 89 89` (D41), the
+  customized-white level at the current 25 percent brightness. Wave's UI
+  requests per-zone colors, so the all-white vector is CAM's stored state,
+  not a proven default. Physical effect for Wave remains unconfirmed (the
+  earlier manual exploration saw no visible change).
+
+### `26 14` real-time streaming (Audio Bass, Audio Level)
+
+**Verified from D42:** selecting `Audio Bass` and then `Audio Level` sent no
+configuration frame at all. CAM instead streamed `26 14` frames:
+
+- Header `26 14 20 20`, then 49 triples at bytes 4-150, zero padding after.
+- 2176 frames in 70.6 seconds, mean interval 32.5 ms (about 31 fps), with
+  no gap at the mode switch and no commit, until capture stop.
+- The controller acknowledged every streamed frame whose ack window the
+  capture covered, with the `ff 01` echo of `26 14`: 2175 echoes for 2176
+  writes, the last write's ack fell outside the window.
+- The `ff 03` heartbeat **stopped** when streaming began (last heartbeat at
+  t=64.23, stream start t=64.57, none in the remaining 70 seconds). Whether
+  it resumes after leaving the audio modes is **unknown**, the capture
+  ended inside the stream.
+- Frame content: up to t=90.42 every frame's 49 triples were identical to
+  each other, pulsing with the music (uniform full-cover color). From
+  t=90.45 on, 1225 frames carried spatially non-uniform triples, for
+  example 7 uniform triples, an 18-triple gradient, then 24 dark, a
+  partially lit meter pattern. Attributing the uniform span to Audio Bass
+  and the spatial span to Audio Level follows the announced selection
+  order, an **inference**, because the mode switch leaves no USB marker.
+- The component order of the `26 14` triples is **unknown**. No controlled
+  color anchor exists for this family.
+
+The opcode implies that the animation for these modes is rendered on the
+host. A Linux implementation of the audio modes would need a daemon
+streaming frames at this cadence, and the same opcode is a candidate for
+arbitrary host-rendered real-time effects. That is an engineering
+implication, not a safe write specification.
+
+### Temperature Monitor: verified negative result
+
+In D42, the selection of `Monitor Temperature` plus its CPU source produced
+**zero writes** during the first 64.6 seconds of the window. In D46, a
+dedicated window, the operator's repeated attempts again produced **zero
+writes of any kind** (the only N9 traffic was 49 heartbeats), and the board
+visibly stayed in the previous Breathing state. The failure is in CAM before
+the USB layer, not a controller rejection, because nothing was transmitted.
+The orchestrator's hypothesis is a CAM issue with virtualized temperature
+sources. The mode's transport pattern remains **unknown** and a retry is
+pending.
+
+### Cross-window reproducibility
+
+Four frames were byte-for-byte identical across independent captures,
+verified by SHA-256 of the extracted payloads: Breathing's selection frame
+(D39 and D43), Breathing's two-color state (D43 final and D45 first, so the
+list state persisted across sessions), Alternating's selection frame (D41
+and D44), and Marquee's 3-triple data frame (D39 and D44).
+
+These captures decode observations only. They do not establish a safe write
+specification for any animated or streamed mode, and no `2a 04`, `26 06`
+parameterized, or `26 14` frame should be written to the device from them.
+
 ## Anomalies and open questions
 
 **Reported manual observation:** while changing effects or profiles, radiator fan lighting and possibly pump lighting stopped being visible. Only RAM and motherboard lighting remained visible.
@@ -674,11 +866,12 @@ Status meaning in this table:
 | `11 02` | IN, controller to host | Firmware information reply to `10 02` | Verified |
 | `20 03` | OUT, host to controller | Channel and accessory information request | Verified |
 | `21 03` | IN, controller to host | Channel and accessory information reply to `20 03` | Verified |
-| `26 04` | OUT, host to controller | Lighting data write | Verified |
-| `26 06` | OUT, host to controller | Lighting commit that follows a `26 04` write | Verified |
-| `2a 04` | OUT, host to controller | Animated-effect configuration write (`Spectrum Wave`, D35-D38), sent once per user action with no commit | Verified |
-| `ff 01` | IN, controller to host | Generic acknowledgment that echoes the recognized opcode, observed after `20 03`, after `26 04`, after `26 06`, and after `2a 04` | Verified |
-| `ff 03` | IN, controller to host | Periodic heartbeat about every 3 seconds carrying a frame counter, with no telemetry payload | Verified |
+| `26 04` | OUT, host to controller | Lighting data write (`Fixed` vector, also the Marquee and Wave data vector) | Verified |
+| `26 06` | OUT, host to controller | Lighting commit that follows a `26 04` write. Constant for `Fixed`, parameterized at bytes 4-5 for Marquee (`02 29`) and Wave (`02 35`) | Verified |
+| `2a 04` | OUT, host to controller | Animated-effect configuration write, one frame per user action with no commit, observed for fourteen firmware-rendered modes (D35-D45) | Verified |
+| `26 14` | OUT, host to controller | Host-rendered streaming frame of 49 triples, about every 32 ms with no commit, observed for the audio modes (D42) | Verified |
+| `ff 01` | IN, controller to host | Generic acknowledgment that echoes the recognized opcode, observed after `20 03`, `26 04`, `26 06`, `2a 04`, and every streamed `26 14` | Verified |
+| `ff 03` | IN, controller to host | Periodic heartbeat about every 3 seconds carrying a frame counter, with no telemetry payload. It stopped during `26 14` streaming in D42 | Verified |
 
 **Verified from the descriptor, not observed in traffic:** the report descriptor also declares Output Report IDs `12 22 24 f2 fe e2 f4` and Input Report IDs `13 23 25 27 29 2b e3 f5` that CAM did not exercise in any captured session. Output Report ID `2a` left this list when the D35-D38 series observed it in traffic. Their existence is a descriptor fact. Their meaning is **unknown** because no capture drove them.
 

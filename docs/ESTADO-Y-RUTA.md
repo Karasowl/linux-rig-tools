@@ -505,6 +505,81 @@ detalles verificados y la clasificación de cada campo están en
 [NZXT-N9-CAM-LIGHTING.md](NZXT-N9-CAM-LIGHTING.md) y en los archivos
 D35-ANALYSIS.md a D38-ANALYSIS.md junto a las capturas privadas.
 
+### 16. Campaña de modos animados, enumeración y campos (D39 a D46)
+
+**Hechos verificados el 22 de julio de 2026, capturas D39 a D46:**
+
+**Metodología por lotes.** Para enumerar rápido sin perder atribución, D39 a
+D42 capturaron selecciones en lote: el operador eligió los modos anunciados en
+orden, con pausas mayores de 12 segundos y sin tocar ningún otro control, y
+cada escritura se atribuye por orden anunciado y timestamp. D43 a D45 fueron
+capturas dirigidas de una variable (lista de colores, tamaño y dirección,
+brillo y extremos de velocidad). D46 fue exploratoria con resultado negativo.
+El trabajador de decodificación reverificó cada afirmación contra los PCAPs
+archivados, con SHA-256 cotejado contra los sidecars.
+
+**Resultados verificados:**
+
+- Los modos capturados usaron tres patrones de transporte: la trama única
+  `2a 04` sin commit para catorce modos renderizados en firmware, el par
+  `26 04` más `26 06` parametrizado para Marquee y Wave, y el streaming
+  `26 14` renderizado en el host para los modos de audio. No es una
+  clasificación completa: el patrón de Temperature Monitor sigue siendo
+  desconocido porque no transmitió nada.
+- El byte 4 de la trama `2a 04` es el identificador de modo, ya verificado
+  con catorce constantes distintas: Fading `01`, Spectrum Wave `02`,
+  Covering Marquee `04`, Alternating `05`, Pulse `06`, Breathing `07`,
+  Candle `08`, Starry Night `09`, Rainbow Flow `0b`, Super Rainbow `0c`,
+  Rainbow Pulse `0d`, Tai Chi `0e`, Water Cooler `0f` y Loading `10`. Los
+  valores `03` y `0a` no aparecieron nunca.
+- La velocidad es un uint16 little endian en los bytes 5 y 6, demostrado por
+  el Normal de Alternating con valor 500. Menor es más rápido, con los
+  extremos de Breathing medidos: Slowest 40, Normal 20 y Fastest 4. La
+  escala es por modo, así que un valor no significa nada sin su modo.
+- La lista de colores empieza en el byte 8 con tripletas contiguas en orden
+  R B G, ancladas en D43 con rojo puro `89 00 00` y azul puro `00 89 00` al
+  25 por ciento. Es el orden inverso al G R B de Fixed. El byte 56 es el
+  contador de entradas y al eliminar una entrada la lista se compacta.
+- El brillo de los modos animados se hornea en las tripletas de la lista.
+  Un punto porcentual movió `27 3e 00` a `28 40 00` y `00 89 00` a
+  `00 8b 00` sin tocar ningún otro byte.
+- El byte 55 es un campo de bits. El bit 1 es la dirección, verificado en
+  dos modos (Spectrum Wave `00` a `02`, Alternating `01` a `03`). Que el
+  bit 0 sea el interruptor de movimiento sigue siendo hipótesis para D47, y
+  Starry Night la complica porque lleva `01` sin exponer ese interruptor.
+- Marquee y Wave no usan la familia `2a`. Envían el vector `26 04` más un
+  `26 06` parametrizado: byte 4 `02` y selector de efecto en el byte 5,
+  `29` Marquee y `35` Wave, frente al `01 00` del commit constante de
+  Fixed. El tamaño de LED de Marquee es el número de tripletas encendidas
+  al inicio del vector, verificado con un paso de 3 a 4.
+- Los modos Audio Bass y Audio Level no envían configuración. CAM emite un
+  flujo continuo de tramas `26 14` de 49 tripletas cada 32 ms
+  aproximadamente, sin commit, que sigue el audio. El controlador acusó con
+  `ff 01` cada trama cuya ventana de acuse quedó dentro de la captura, 2175
+  acuses para 2176 escrituras, y su heartbeat `ff 03` se detuvo mientras el flujo
+  estuvo activo. El efecto vive en el host.
+- Temperature Monitor tiene resultado negativo verificado por partida
+  doble: cero escrituras en su tramo de D42 y cero escrituras en toda la
+  ventana dedicada D46, pese a los intentos del operador. El fallo ocurre
+  en CAM antes del USB. Causa desconocida, con la hipótesis de las fuentes
+  de temperatura virtualizadas de la VM.
+- Reproducibilidad entre ventanas: cuatro tramas resultaron idénticas byte
+  por byte entre capturas independientes (Breathing en D39 y D43, el estado
+  de dos colores de Breathing entre D43 y D45, Alternating en D41 y D44 y
+  el vector de Marquee en D39 y D44), verificado por SHA-256 de los
+  volcados.
+
+**Desconocido:** el significado de los bytes 3, 7 (Candle llevó `56`), 57 y
+58 a 59 (`31 03`, con `31 04` en Alternating), los parámetros restantes del
+`26 06` parametrizado, el orden de componentes de las tripletas `26 14`, los
+rangos de velocidad de los modos distintos de Breathing y el máximo real de
+la lista de colores. Ningún campo de `2a 04`, `26 06` parametrizado o
+`26 14` es todavía una especificación segura de escritura.
+
+Los detalles por captura están en los archivos D39-ANALYSIS.md a
+D46-ANALYSIS.md junto a las capturas privadas, y el mapa consolidado de
+campos está en [NZXT-N9-CAM-LIGHTING.md](NZXT-N9-CAM-LIGHTING.md).
+
 ## Técnicas usadas y qué esperamos obtener de cada una
 
 | Técnica | Para qué se usa | Qué ha producido | Qué esperamos obtener después |
@@ -512,7 +587,7 @@ D35-ANALYSIS.md a D38-ANALYSIS.md junto a las capturas privadas.
 | Inventario con sysfs, `lsusb`, hidraw y sensores | Identificar el hardware real y sus límites | VID, PID, interfaces y ausencia de PWM Linux | Detección estable sin depender de números de bus o hidraw |
 | QEMU/KVM y passthrough USB | Ejecutar las aplicaciones oficiales contra el hardware real | Laboratorio Windows reproducible | Capturar Cooling, efectos y dispositivos restantes |
 | `usbmon`, tshark y PCAP | Observar bytes sin escribir desde Linux | Handshake, heartbeat y tramas de iluminación | Descubrir telemetría, canales, efectos y controles |
-| Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D38 con acciones aisladas | Reducir falsos positivos y establecer causalidad más fuerte |
+| Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D46 con acciones aisladas o lotes atribuibles | Reducir falsos positivos y establecer causalidad más fuerte |
 | Repetición byte por byte | Separar coincidencias de comportamiento reproducible | Repetición de brillo y colores mixtos | Tramas doradas para pruebas automáticas |
 | Pruebas discriminantes | Refutar fórmulas que coinciden por accidente | El modelo sobrevivió D22, D24 y una escritura física inédita D25. D26 a D32 aislaron estado y límites por zona | Usar el laboratorio Fixed para detectar cruces que difieran de la tesis por zona |
 | Análisis del descriptor HID | Resolver formato y dirección de reportes | Report ID `0x26`, longitud 512 y ausencia de Feature reports | Construir escrituras con la forma correcta |
@@ -530,11 +605,12 @@ D35-ANALYSIS.md a D38-ANALYSIS.md junto a las capturas privadas.
 | Entrada | `11 02` | Respuesta de información de firmware |
 | Salida | `20 03` | Solicitud de canales o accesorios |
 | Entrada | `21 03` | Respuesta de canales o accesorios |
-| Entrada | `ff 01` | Confirmación que repite el opcode aceptado, observada tras `20 03`, `26 04`, `26 06` y `2a 04` |
-| Entrada | `ff 03` | Heartbeat periódico, sin telemetría viva |
-| Salida | `26 04` | Datos de iluminación observados |
-| Salida | `26 06` | Commit o latch de iluminación observado |
-| Salida | `2a 04` | Configuración de efecto animado observada en Spectrum Wave, una trama por acción y sin commit |
+| Entrada | `ff 01` | Confirmación que repite el opcode aceptado, observada tras `20 03`, `26 04`, `26 06`, `2a 04` y cada `26 14` del streaming |
+| Entrada | `ff 03` | Heartbeat periódico, sin telemetría viva. Se detuvo durante el streaming `26 14` de D42 |
+| Salida | `26 04` | Datos de iluminación observados, vector de Fixed y también de Marquee y Wave |
+| Salida | `26 06` | Commit o latch de iluminación observado. Constante en Fixed y parametrizado en bytes 4 y 5 para Marquee y Wave |
+| Salida | `2a 04` | Configuración de efecto animado, una trama por acción y sin commit, observada en catorce modos de firmware |
+| Salida | `26 14` | Trama de streaming en tiempo real de 49 tripletas, cada 32 ms aproximados y sin commit, observada en los modos de audio |
 
 ### Lo que ya puede afirmarse
 
@@ -559,12 +635,14 @@ D35-ANALYSIS.md a D38-ANALYSIS.md junto a las capturas privadas.
   aros de ventiladores y la RAM no cambiaron durante la prueba.
 - No se ha capturado la página Cooling, por lo que no conocemos RPM,
   temperaturas, duty ni curvas del N9.
-- De los modos animados, Spectrum Wave ya tiene su trama de configuración
-  `2a 04` capturada y verificada. El efecto reside en el firmware y CAM no
-  transmite frames continuos en ese modo. Los campos de velocidad y dirección
-  están observados con dos valores cada uno. Los demás modos animados siguen
-  sin capturar y ningún campo de `2a 04` es todavía una especificación segura
-  de escritura.
+- Los modos animados están enumerados por completo. Catorce modos usan la
+  trama `2a 04` con identificador en el byte 4, velocidad uint16 con escala
+  por modo, lista de colores R B G con brillo horneado y campo de bits en el
+  byte 55. Marquee y Wave usan el par `26 04` más `26 06` parametrizado. Los
+  modos de audio son streaming `26 14` del host a unos 32 ms por trama.
+  Temperature Monitor no llegó a transmitir en la VM. Ningún campo de
+  `2a 04`, `26 06` parametrizado o `26 14` es todavía una especificación
+  segura de escritura.
 
 ## Primer hito (cerrado)
 
@@ -723,18 +801,35 @@ primero la iluminación con todo su alcance y abordar refrigeración después.
 Hasta entonces, el arnés de iluminación debe seguir siendo de laboratorio:
 tramas congeladas, sin parámetros libres y sin empaquetado de sistema. No se
 debe ampliar a Cooling, firmware, duty ni curvas sin capturas nuevas y
-supervisión física.
+supervisión física, y ningún campo de `2a 04`, `26 06` parametrizado o
+`26 14` debe escribirse al dispositivo desde estas capturas.
 
-Fixed quedó aceptado como completo tras el QA físico del laboratorio visual, y
-la serie D35 a D38 abrió la decodificación de los modos animados con Spectrum
-Wave. La siguiente unidad natural es capturar un segundo modo animado, por
-ejemplo Breathing o Rainbow Flow, con la misma disciplina de una acción por
-ventana. Ese contraste discrimina si el byte 4 de la trama `2a 04` es
-realmente el identificador de modo y si la familia `2a` cubre los demás
-efectos. Después conviene capturar los extremos de velocidad `Slowest` y
-`Fastest` de Spectrum Wave, que fijan el rango del campo de velocidad y pueden
-resolver si ocupa 1 o 2 bytes. Con esos anclajes, el mapa de campos de los
-modos animados puede empezar a promoverse con evidencia en vez de suposición.
+Fixed quedó aceptado como completo tras el QA físico del laboratorio visual.
+La serie D35 a D38 abrió la decodificación de los modos animados con Spectrum
+Wave y la campaña D39 a D46 completó la enumeración de modos y los primeros
+campos: identificador de modo verificado, velocidad uint16 con escala por
+modo, lista de colores R B G con brillo horneado, bit de dirección, la
+familia `26 06` parametrizada de Marquee y Wave y el streaming `26 14` de los
+modos de audio.
+
+Los pendientes concretos de iluminación, en orden natural:
+
+- D47, ya preparado: capturar el toggle real del interruptor de movimiento de
+  Alternating para resolver la hipótesis del bit 0 del byte 55, que la
+  observación de Starry Night dejó en duda.
+- Reintentar Temperature Monitor, quizá tras reiniciar CAM o con otra fuente
+  de temperatura, para determinar su patrón de transporte. Hoy tiene doble
+  resultado negativo en la VM y ninguna trama capturada.
+- Capturar los extremos de velocidad de los modos distintos de Breathing,
+  que fijan el rango por modo del campo uint16.
+- Discriminar los parámetros restantes del `26 06` parametrizado y los bytes
+  aún sin semántica de la trama `2a 04` (3, 7, 57 y 58 a 59).
+
+Con la iluminación cerrada, sigue la Macroetapa 3, refrigeración del N9:
+capturar la página Cooling con RPM visibles, encontrar la telemetría real de
+temperaturas y ventiladores, y decodificar duty y curvas con lectura primero
+y escritura supervisada después. Es la etapa de mayor riesgo porque el N9
+controla todos los headers de ventiladores de la placa.
 
 ## Artefactos principales
 

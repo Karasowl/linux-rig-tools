@@ -124,37 +124,84 @@ an effective multiplier around 0.069 in that candidate family. This is a fitted
 compatibility interval, not a confirmed formula. These captures do not prove
 one triple per LED, confirm a channel index, or establish safe write semantics.
 
-## Animated modes: first findings (Spectrum Wave)
+## Animated modes: decoded observations (D35-D46)
 
-The D35-D38 capture series (2026-07-21/22) isolated `Spectrum Wave` with one
-human action per window. Verified from the PCAPs: each action produced exactly
-one 512-byte interrupt OUT frame starting `2a 04 20 20`, with **no `26 06`
-commit** and no further host writes afterwards (up to 174 s of observed
-silence while the animation kept running). The controller acknowledged each
-frame with the known `ff 01` echo of the `2a 04` opcode. The operator
-confirmed the rainbow started, visibly accelerated on the speed step, and
-reversed on the direction change, with all fans normal throughout. The repeat
-capture reproduced the first frame byte for byte.
+The D35-D38 series (2026-07-21/22) isolated `Spectrum Wave` with one human
+action per window. The D39-D46 campaign (2026-07-22) then enumerated every
+remaining CAM lighting mode and decoded the first fields, using attributable
+batch selections plus targeted single-variable captures. Everything below is
+verified from the archived PCAPs unless labeled otherwise, for this board,
+CAM 4.76.5, and Channel 6.
 
-Verified conclusion for this board, CAM 4.76.5, and Channel 6: the animation
-is rendered by the controller firmware. CAM sends a single configuration
-frame per user action and does not stream animation frames in this mode.
+**Three observed transport patterns, verified** (not a complete
+classification: `Monitor Temperature` transmitted nothing in its window and
+its pattern remains unknown):
 
-Observed fields, evidence-classified:
+1. **Firmware effects** (fourteen modes): one 512-byte `2a 04` configuration
+   frame per user action, **no `26 06` commit**, no further host traffic (up
+   to 174 s of observed silence while the animation kept running). The
+   controller acknowledges each frame with the `ff 01` echo of the opcode.
+2. **`26`-family effects** (`Marquee`, `Wave`): no `2a` frame. Each action
+   sends the `Fixed`-style `26 04` GRB vector plus a **parameterized
+   `26 06` commit** 2-3 ms later: byte 4 is `02` (Fixed uses `01`) and
+   byte 5 selects the effect, `29` Marquee, `35` Wave (`00` Fixed).
+   Marquee's LED size is the number of lit triples at the start of the
+   vector (one size step went from 3 to 4). The other commit parameters are
+   **unknown**.
+3. **Host streaming** (`Audio Bass`, `Audio Level`): no configuration frame
+   at all. CAM streams `26 14` frames (header `26 14 20 20`, 49 triples)
+   about every 32 ms, following the audio, with no commit, for the whole
+   remainder of the capture (leaving the mode was not captured). The
+   controller acked every streamed frame whose ack window the capture
+   covered, and its `ff 03` heartbeat stopped while the stream was active.
 
-- Byte 4 `02` as the `Spectrum Wave` mode identifier is an **inference**
-  until a second animated mode is captured.
-- Byte 5 is speed-related (**verified** as the only byte changed by a speed
-  step): `fa` (250) for `Normal`, `96` (150) for `Fast`. "Lower is faster"
-  is an **inference** from two points, and the field width (1 or 2 bytes) is
+**Mode identifiers** (byte 4 of `2a 04`), all measured in traffic. Modes
+marked * were captured in a single window and remain single observations:
+
+| `01` Fading* | `02` Spectrum Wave | `04` Covering Marquee* | `05` Alternating |
+|---|---|---|---|
+| `06` Pulse* | `07` Breathing | `08` Candle* | `09` Starry Night* |
+| `0b` Rainbow Flow* | `0c` Super Rainbow* | `0d` Rainbow Pulse* | `0e` Tai Chi* |
+| `0f` Water Cooler* | `10` Loading* | | |
+
+`03` and `0a` never appeared. Marquee and Wave have no `2a` identifier.
+
+Decoded `2a 04` fields, evidence-classified:
+
+- Byte 4 mode identifier: **verified** across fourteen distinct constants
+  following the announced selection order in four independent windows.
+- Bytes 5-6 speed: **verified** little-endian uint16 (Alternating `Normal`
+  is 500), lower is faster (**verified** with Breathing `Slowest` 40,
+  `Normal` 20, `Fastest` 4 plus the observed acceleration in D36). The
+  scale is **per mode**, so a value is meaningless without its mode. Ranges
+  for the other modes are uncaptured.
+- Bytes 8+ color list: **verified** contiguous 3-byte entries in **R B G
+  order** (pure red entered as `89 00 00`, pure blue as `00 89 00` at 25%),
+  the reverse of Fixed's G R B. Byte 56 is the entry count, and deleting an
+  entry compacts the list. Brightness is **baked into the entries** (one
+  brightness step rewrote only the color bytes), with the full-component
+  level matching the per-zone Fixed level at 25%. The exact quantizer is
   **unknown**.
-- Byte 55 is direction-related (**verified** as the only byte changed by a
-  direction change): `00` right, `02` left. The encoding rationale is
-  **unknown**.
-- Bytes 58-59 carry the constant `31 03`. Meaning **unknown**.
+- Byte 55 bit field: bit 1 is direction, **verified in two modes**
+  (Spectrum Wave `00` to `02`, Alternating `01` to `03`). Bit 0 as the
+  movement switch is a **hypothesis** pending a dedicated toggle capture,
+  and Starry Night carried `01` without exposing that switch.
+- Bytes 3, 7 (Candle carried `56`), 57, and 58-59 (`31 03`, but `31 04` in
+  Alternating): meaning **unknown**.
 
-These are decoding observations, not a safe write specification. No
-animated-mode write path exists or is authorized from them. Details live in
+`Monitor Temperature` has a **verified negative result**: selecting it plus
+its CPU source transmitted zero frames in two separate windows (the board
+visibly kept its previous effect). The failure is in CAM before the USB
+layer, likely related to the virtualized temperature sources (**inference**).
+Its transport pattern is **unknown** and a retry is pending.
+
+Implication for Linux, stated as engineering direction rather than a spec:
+the audio modes cannot be reproduced with a one-shot write. They would need
+a daemon streaming `26 14` frames at ~30 ms cadence. The same opcode is a
+candidate path for arbitrary host-rendered real-time effects on the 49
+zones. None of this authorizes writes: no `2a 04`, parameterized `26 06`,
+or `26 14` frame is a safe write specification yet. Details and per-capture
+evidence live in
 [NZXT CAM lighting observations](../../docs/NZXT-N9-CAM-LIGHTING.md).
 
 ## Device
