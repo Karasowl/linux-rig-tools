@@ -136,21 +136,27 @@ la placa a Fixed. Este QA valida únicamente la repetición D35 congelada y la
 restauración D32 en esta placa. No autoriza otras tramas animadas ni parámetros
 inferidos.
 
-## Laboratorio de escritura Alternating D47 fase 1 (cerrado, no instalado)
+## Laboratorio de escritura Alternating D47, D49 y D50 (cerrado, no instalado)
 
-`bin/nzxt-n9-alternating-write-lab` es un arnés cerrado separado para dos
-tramas exactas de 512 bytes extraídas directamente de la captura privada D47.
-No es un encoder y no acepta como entrada payload, color, brillo, velocidad,
-dirección, modo, canal, número de LED ni ruta hidraw.
+`bin/nzxt-n9-alternating-write-lab` es un arnés cerrado separado para seis
+tramas exactas de 512 bytes extraídas directamente de las capturas privadas
+D47, D49 y D50. Cinco operaciones nominales cubren la tabla medida con
+desplazamiento hacia la derecha. La sexta conserva el estado D47 en posición
+y Normal. No es un encoder y no acepta como entrada payload, color, brillo,
+velocidad numérica, dirección, modo, canal, número de LED ni ruta hidraw.
 
 Los únicos estados Alternating disponibles son:
 
-| Operación cerrada | Trama D47 | Velocidad observada | Byte 55 | SHA-256 binario |
-| --- | ---: | ---: | ---: | --- |
-| `travel-right-normal` | 1477 | 500 | `01` | `bb88f24351f7817582c5f591203c5cae3b4963ad4b6bb1e2fd244b56c9dee782` |
-| `in-place-right-normal` | 3725 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
+| Operación cerrada | Trama fuente | Velocidad observada | Byte 55 | SHA-256 binario |
+| --- | --- | ---: | ---: | --- |
+| `travel-right-fastest` | D49 1789 y 2579 | 300 | `01` | `889337b9110e41ef9a9bae29022e2748d393d8474b9cc7743fc7b4e30ccc4c03` |
+| `travel-right-fast` | D50 1443 | 400 | `01` | `f0c00d9b1e524fd6143dc72f04a0be41cb4c4b47299e324f78573c6700184f42` |
+| `travel-right-normal` | D47 1477 y 4667, D49 2431, D50 1471 | 500 | `01` | `bb88f24351f7817582c5f591203c5cae3b4963ad4b6bb1e2fd244b56c9dee782` |
+| `travel-right-slow` | D50 1497 | 700 | `01` | `ccc5de88b19f5a4ce518ff28beb49783af40073453a6546543d0b84fcb1c6ab2` |
+| `travel-right-slowest` | D49 2187 y D50 1519 | 800 | `01` | `bca2c0146e7ea24ea02f9f3ef1be93117d9559871ca275637ecf845a69db03fe` |
+| `in-place-right-normal` | D47 3725 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
 
-Ambas tramas llevan el modo `05`, los bytes de color capturados exactos
+Todas las tramas llevan el modo `05`, los bytes de color capturados exactos
 `28 40 8b 00 61 00`, recuento de colores `02`, byte 57 `00` y bytes 58 y 59
 `31 04`. Cada operación Aplicar hace una escritura de 512 bytes sin commit,
 pausa, reintento ni segunda escritura. La restauración D32 delega en la
@@ -158,13 +164,17 @@ transacción tipada Fixed ya publicada.
 
 ```
 nzxt-n9-alternating-write-lab --offline preflight
+nzxt-n9-alternating-write-lab --offline apply-travel-right-fastest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D49-TRAVEL-RIGHT-FASTEST
+nzxt-n9-alternating-write-lab --offline apply-travel-right-fast I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D50-TRAVEL-RIGHT-FAST
 nzxt-n9-alternating-write-lab --offline apply-travel-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-TRAVEL-RIGHT-NORMAL
+nzxt-n9-alternating-write-lab --offline apply-travel-right-slow I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D50-TRAVEL-RIGHT-SLOW
+nzxt-n9-alternating-write-lab --offline apply-travel-right-slowest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D49-TRAVEL-RIGHT-SLOWEST
 nzxt-n9-alternating-write-lab --offline apply-in-place-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-IN-PLACE-RIGHT-NORMAL
 nzxt-n9-alternating-write-lab --offline restore-d32 I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED
 ```
 
-El modo offline nunca resuelve, abre ni escribe hidraw para las dos
-operaciones D47. El preflight real reutiliza del laboratorio D35 publicado
+El modo offline nunca resuelve, abre ni escribe hidraw para ninguna operación.
+El preflight real reutiliza del laboratorio D35 publicado
 las comprobaciones de identidad HID exacta, descriptor, major:minor, nodo de
 caracteres directo, permiso de escritura y CPU Package sin abrir hidraw.
 Aplicar en modo real repite después de abrir las comprobaciones de identidad
@@ -183,10 +193,12 @@ nuevo. El preflight final pasó a 63,0 C y ningún proceso retuvo un handle de
 hidraw. El operador confirmó que ambos efectos se vieron correctamente y que
 los ventiladores y la bomba permanecieron normales.
 
-Este QA físico valida únicamente esas dos tramas D47 exactas y las dos
-restauraciones D32 en esta placa. No incluye ni autoriza la dirección
-contraria, otra velocidad ni ningún estado de D48 a D51. Esas mediciones no
-se deben inferir ni exponer mediante este laboratorio.
+Este QA físico valida únicamente las dos tramas D47 exactas y las dos
+restauraciones D32 en esta placa. Las cuatro operaciones nuevas de velocidad
+D49 y D50 están verificadas mecánicamente contra sus PCAP privadas, pero aún
+no tienen QA físico. El laboratorio no expone la dirección contraria,
+velocidades en posición distintas de Normal ni estados D48 o D51. No se debe
+inferir ningún estado no medido.
 
 ## Observaciones de iluminación de CAM
 

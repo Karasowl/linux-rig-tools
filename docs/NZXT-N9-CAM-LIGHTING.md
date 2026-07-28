@@ -1038,6 +1038,31 @@ had wrongly stated it contained none. Its values, `Fast` 400 and `Slow` 700,
 were reconstructed from the values themselves rather than from an announced
 action log; D50 re-derives them under the announced protocol with controls.
 
+The closed, uninstalled Alternating laboratory now exposes the five exact
+travelling-right states measured by D47, D49 and D50. It freezes the full
+512-byte PCAP payload for each nominal operation rather than encoding a speed:
+
+| Operation | Canonical source frame | Speed | Binary SHA-256 |
+| --- | --- | ---: | --- |
+| `travel-right-fastest` | D49 1789 and 2579 | 300 | `889337b9110e41ef9a9bae29022e2748d393d8474b9cc7743fc7b4e30ccc4c03` |
+| `travel-right-fast` | D50 1443 | 400 | `f0c00d9b1e524fd6143dc72f04a0be41cb4c4b47299e324f78573c6700184f42` |
+| `travel-right-normal` | D47 1477 and 4667, D49 2431, D50 1471 | 500 | `bb88f24351f7817582c5f591203c5cae3b4963ad4b6bb1e2fd244b56c9dee782` |
+| `travel-right-slow` | D50 1497 | 700 | `ccc5de88b19f5a4ce518ff28beb49783af40073453a6546543d0b84fcb1c6ab2` |
+| `travel-right-slowest` | D49 2187 and D50 1519 | 800 | `bca2c0146e7ea24ea02f9f3ef1be93117d9559871ca275637ecf845a69db03fe` |
+
+D47, D49 and D50 reproduce the Normal payload byte for byte. D49 and D50
+reproduce the Slowest payload byte for byte. Across the five states only
+bytes 5 and 6 differ. D49 PCAP SHA-256 is
+`ad4abf5534676c51cd4ee09b03f90c971d8c2193a02ea4de8080725a299b2b14`
+and D50 PCAP SHA-256 is
+`860c77728a76281056524f0ef469c965e631523fa2faef8bdf50983280a579db`.
+The private captures and every relevant frame are re-extracted by the offline
+test suite. D50a is not used to construct any payload.
+
+The four new D49 and D50 operations have mechanical and capture-level
+verification only. They have not yet been written to hardware by this
+laboratory and do not inherit D47's physical QA.
+
 ### D51: the sub-mode factor is not a rule
 
 A confirmation window on 2026-07-26 measuring the two notches D48 had left

@@ -131,21 +131,27 @@ subsequent typed D32 restoration completed successfully and returned the board
 to Fixed. This QA validates only the frozen D35 replay and D32 restore on this
 board. It does not authorize other animated frames or inferred parameters.
 
-## Alternating D47 phase 1 write lab (closed, not installed)
+## Alternating D47, D49 and D50 write lab (closed, not installed)
 
-`bin/nzxt-n9-alternating-write-lab` is a separate closed harness for two exact
-512-byte frames extracted directly from the private D47 capture. It is not an
-encoder and has no inputs for a payload, color, brightness, speed, direction,
-mode, channel, LED count or hidraw path.
+`bin/nzxt-n9-alternating-write-lab` is a separate closed harness for six exact
+512-byte frames extracted directly from the private D47, D49 and D50 captures.
+Five named operations cover the measured travelling-right speed table. The
+sixth preserves the D47 in-place Normal state. It is not an encoder and has no
+inputs for a payload, color, brightness, numeric speed, direction, mode,
+channel, LED count or hidraw path.
 
 The only available Alternating states are:
 
-| Closed operation | D47 frame | Observed speed | Byte 55 | Binary SHA-256 |
-| --- | ---: | ---: | ---: | --- |
-| `travel-right-normal` | 1477 | 500 | `01` | `bb88f24351f7817582c5f591203c5cae3b4963ad4b6bb1e2fd244b56c9dee782` |
-| `in-place-right-normal` | 3725 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
+| Closed operation | Source frame | Observed speed | Byte 55 | Binary SHA-256 |
+| --- | --- | ---: | ---: | --- |
+| `travel-right-fastest` | D49 1789 and 2579 | 300 | `01` | `889337b9110e41ef9a9bae29022e2748d393d8474b9cc7743fc7b4e30ccc4c03` |
+| `travel-right-fast` | D50 1443 | 400 | `01` | `f0c00d9b1e524fd6143dc72f04a0be41cb4c4b47299e324f78573c6700184f42` |
+| `travel-right-normal` | D47 1477 and 4667, D49 2431, D50 1471 | 500 | `01` | `bb88f24351f7817582c5f591203c5cae3b4963ad4b6bb1e2fd244b56c9dee782` |
+| `travel-right-slow` | D50 1497 | 700 | `01` | `ccc5de88b19f5a4ce518ff28beb49783af40073453a6546543d0b84fcb1c6ab2` |
+| `travel-right-slowest` | D49 2187 and D50 1519 | 800 | `01` | `bca2c0146e7ea24ea02f9f3ef1be93117d9559871ca275637ecf845a69db03fe` |
+| `in-place-right-normal` | D47 3725 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
 
-Both frames carry mode `05`, the exact captured color bytes
+All frames carry mode `05`, the exact captured color bytes
 `28 40 8b 00 61 00`, color count `02`, byte 57 `00`, and bytes 58 and 59
 `31 04`. Each Apply operation makes one 512-byte write with no commit, sleep,
 retry or second write. D32 restoration delegates to the already published
@@ -153,13 +159,17 @@ typed Fixed transaction.
 
 ```
 nzxt-n9-alternating-write-lab --offline preflight
+nzxt-n9-alternating-write-lab --offline apply-travel-right-fastest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D49-TRAVEL-RIGHT-FASTEST
+nzxt-n9-alternating-write-lab --offline apply-travel-right-fast I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D50-TRAVEL-RIGHT-FAST
 nzxt-n9-alternating-write-lab --offline apply-travel-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-TRAVEL-RIGHT-NORMAL
+nzxt-n9-alternating-write-lab --offline apply-travel-right-slow I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D50-TRAVEL-RIGHT-SLOW
+nzxt-n9-alternating-write-lab --offline apply-travel-right-slowest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D49-TRAVEL-RIGHT-SLOWEST
 nzxt-n9-alternating-write-lab --offline apply-in-place-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-IN-PLACE-RIGHT-NORMAL
 nzxt-n9-alternating-write-lab --offline restore-d32 I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED
 ```
 
-Offline mode never resolves, opens or writes hidraw for the two D47
-operations. Real preflight uses the exact HID identity, descriptor,
+Offline mode never resolves, opens or writes hidraw for any operation. Real
+preflight uses the exact HID identity, descriptor,
 major:minor, direct character node, write permission and CPU Package checks
 from the published D35 laboratory without opening hidraw. Real Apply repeats
 the identity and Output Report `0x2a` checks after open, shares the same
@@ -176,10 +186,11 @@ seconds, and restored D32 again. The final preflight passed at 63.0 C and no
 process retained a hidraw handle. The operator confirmed that both effects
 looked correct and that fans and pump remained normal.
 
-This physical QA validates only those two exact D47 frames and the two D32
-restorations on this board. It does not include or authorize the opposite
-direction, any other speed, or any D48 through D51 state. Those measurements
-must not be inferred or exposed through this laboratory.
+This physical QA validates only the two exact D47 frames and the two D32
+restorations on this board. The four new D49 and D50 speed operations are
+mechanically verified against their private PCAPs but do not yet have physical
+QA. The laboratory does not expose the opposite direction, in-place speed
+notches beyond Normal, D48 or D51 states. No unmeasured state may be inferred.
 
 ## CAM lighting observations
 

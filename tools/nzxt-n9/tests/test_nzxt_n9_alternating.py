@@ -1,4 +1,4 @@
-"""All Alternating D47 tests use fakes. Never open real hidraw."""
+"""All Alternating D47, D49 and D50 tests use fakes. Never open real hidraw."""
 from __future__ import annotations
 
 import contextlib
@@ -64,10 +64,17 @@ class _NoopLock:
 class FrameTests(unittest.TestCase):
     def test_exact_frames_hashes_and_critical_bytes(self) -> None:
         states = alternating.AlternatingD47()
+        travel_by_name = {
+            "fastest": states.travel_right_fastest_frame(),
+            "fast": states.travel_right_fast_frame(),
+            "normal": states.travel_right_normal_frame(),
+            "slow": states.travel_right_slow_frame(),
+            "slowest": states.travel_right_slowest_frame(),
+        }
         travel = states.travel_right_normal_frame()
         in_place = states.in_place_right_normal_frame()
 
-        for frame in (travel, in_place):
+        for frame in (*travel_by_name.values(), in_place):
             self.assertEqual(len(frame), 512)
             self.assertEqual(frame[:5], bytes.fromhex("2a04202005"))
             self.assertEqual(frame[8:14], bytes.fromhex("28408b006100"))
@@ -76,18 +83,41 @@ class FrameTests(unittest.TestCase):
             self.assertEqual(frame[58:60], bytes.fromhex("3104"))
             self.assertFalse(any(frame[60:]))
 
-        self.assertEqual(travel[5:7], bytes.fromhex("f401"))
-        self.assertEqual(travel[55], 1)
+        expected = {
+            "fastest": (300, alternating.TRAVEL_RIGHT_FASTEST_SHA256),
+            "fast": (400, alternating.TRAVEL_RIGHT_FAST_SHA256),
+            "normal": (500, alternating.TRAVEL_RIGHT_NORMAL_SHA256),
+            "slow": (700, alternating.TRAVEL_RIGHT_SLOW_SHA256),
+            "slowest": (800, alternating.TRAVEL_RIGHT_SLOWEST_SHA256),
+        }
+        for name, frame in travel_by_name.items():
+            speed, digest = expected[name]
+            with self.subTest(name=name):
+                self.assertEqual(int.from_bytes(frame[5:7], "little"), speed)
+                self.assertEqual(frame[55], 1)
+                self.assertEqual(hashlib.sha256(frame).hexdigest(), digest)
+
         self.assertEqual(in_place[5:7], bytes.fromhex("e803"))
         self.assertEqual(in_place[55], 0)
-        self.assertEqual(
-            hashlib.sha256(travel).hexdigest(),
-            alternating.TRAVEL_RIGHT_NORMAL_SHA256,
-        )
         self.assertEqual(
             hashlib.sha256(in_place).hexdigest(),
             alternating.IN_PLACE_RIGHT_NORMAL_SHA256,
         )
+        for name, frame in travel_by_name.items():
+            self.assertEqual(
+                [
+                    index
+                    for index, pair in enumerate(zip(travel, frame, strict=True))
+                    if pair[0] != pair[1]
+                ],
+                {
+                    "fastest": [5],
+                    "fast": [5],
+                    "normal": [],
+                    "slow": [5, 6],
+                    "slowest": [5, 6],
+                }[name],
+            )
         self.assertEqual(
             [
                 index
@@ -101,6 +131,18 @@ class FrameTests(unittest.TestCase):
         state = alternating.AlternatingD47()
         cases = (
             (
+                state.travel_right_fastest_frame(),
+                alternating._TRAVEL_RIGHT_FASTEST_FRAME,
+                alternating.TRAVEL_RIGHT_FASTEST_SHA256,
+                "D49 travel-right-fastest",
+            ),
+            (
+                state.travel_right_fast_frame(),
+                alternating._TRAVEL_RIGHT_FAST_FRAME,
+                alternating.TRAVEL_RIGHT_FAST_SHA256,
+                "D50 travel-right-fast",
+            ),
+            (
                 state.travel_right_normal_frame(),
                 alternating._TRAVEL_RIGHT_NORMAL_FRAME,
                 alternating.TRAVEL_RIGHT_NORMAL_SHA256,
@@ -111,6 +153,18 @@ class FrameTests(unittest.TestCase):
                 alternating._IN_PLACE_RIGHT_NORMAL_FRAME,
                 alternating.IN_PLACE_RIGHT_NORMAL_SHA256,
                 "D47 in-place-right-normal",
+            ),
+            (
+                state.travel_right_slow_frame(),
+                alternating._TRAVEL_RIGHT_SLOW_FRAME,
+                alternating.TRAVEL_RIGHT_SLOW_SHA256,
+                "D50 travel-right-slow",
+            ),
+            (
+                state.travel_right_slowest_frame(),
+                alternating._TRAVEL_RIGHT_SLOWEST_FRAME,
+                alternating.TRAVEL_RIGHT_SLOWEST_SHA256,
+                "D49 travel-right-slowest",
             ),
         )
         for original, expected, digest, label in cases:
@@ -181,8 +235,121 @@ class FrameTests(unittest.TestCase):
             ],
         )
 
+    def test_private_d49_and_d50_captures_match_every_relevant_frame(self) -> None:
+        tshark = shutil.which("tshark")
+        if (
+            not alternating.D49_PCAP_PATH.is_file()
+            or not alternating.D50_PCAP_PATH.is_file()
+            or tshark is None
+        ):
+            self.skipTest("private D49 and D50 PCAPs or tshark are unavailable")
+
+        captures = (
+            (
+                alternating.D49_PCAP_PATH,
+                alternating.D49_PCAP_SHA256,
+                [
+                    (
+                        alternating.TRAVEL_RIGHT_FASTEST_D49_FRAME_NUMBERS[0],
+                        alternating.AlternatingD47().travel_right_fastest_frame(),
+                    ),
+                    (
+                        alternating.TRAVEL_RIGHT_SLOWEST_D49_FRAME_NUMBER,
+                        alternating.AlternatingD47().travel_right_slowest_frame(),
+                    ),
+                    (
+                        alternating.TRAVEL_RIGHT_NORMAL_D49_FRAME_NUMBER,
+                        alternating.AlternatingD47().travel_right_normal_frame(),
+                    ),
+                    (
+                        alternating.TRAVEL_RIGHT_FASTEST_D49_FRAME_NUMBERS[1],
+                        alternating.AlternatingD47().travel_right_fastest_frame(),
+                    ),
+                ],
+            ),
+            (
+                alternating.D50_PCAP_PATH,
+                alternating.D50_PCAP_SHA256,
+                [
+                    (
+                        alternating.TRAVEL_RIGHT_FAST_D50_FRAME_NUMBER,
+                        alternating.AlternatingD47().travel_right_fast_frame(),
+                    ),
+                    (
+                        alternating.TRAVEL_RIGHT_NORMAL_D50_FRAME_NUMBER,
+                        alternating.AlternatingD47().travel_right_normal_frame(),
+                    ),
+                    (
+                        alternating.TRAVEL_RIGHT_SLOW_D50_FRAME_NUMBER,
+                        alternating.AlternatingD47().travel_right_slow_frame(),
+                    ),
+                    (
+                        alternating.TRAVEL_RIGHT_SLOWEST_D50_FRAME_NUMBER,
+                        alternating.AlternatingD47().travel_right_slowest_frame(),
+                    ),
+                ],
+            ),
+        )
+        for path, expected_pcap_sha256, expected_frames in captures:
+            with self.subTest(path=path):
+                self.assertEqual(
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                    expected_pcap_sha256,
+                )
+                result = subprocess.run(
+                    [
+                        tshark,
+                        "-r",
+                        str(path),
+                        "-Y",
+                        (
+                            "usb.bus_id == 3 && usb.device_address == 6 && "
+                            "usb.transfer_type == 0x01 && "
+                            "usb.endpoint_address.direction == 0 && usb.capdata"
+                        ),
+                        "-T",
+                        "fields",
+                        "-e",
+                        "frame.number",
+                        "-e",
+                        "usb.capdata",
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                actual_frames = []
+                for line in result.stdout.splitlines():
+                    number, hex_payload = line.split("\t", 1)
+                    frame = bytes.fromhex(hex_payload)
+                    if frame.startswith(bytes.fromhex("2a04")):
+                        actual_frames.append((int(number), frame))
+                self.assertEqual(actual_frames, expected_frames)
+
+    def test_repeated_controls_are_identical_across_d47_d49_and_d50(self) -> None:
+        state = alternating.AlternatingD47()
+        normal = state.travel_right_normal_frame()
+        slowest = state.travel_right_slowest_frame()
+        self.assertEqual(
+            hashlib.sha256(normal).hexdigest(),
+            "bb88f24351f7817582c5f591203c5cae3b4963ad4b6bb1e2fd244b56c9dee782",
+        )
+        self.assertEqual(
+            hashlib.sha256(slowest).hexdigest(),
+            "bca2c0146e7ea24ea02f9f3ef1be93117d9559871ca275637ecf845a69db03fe",
+        )
+
 
 class WriterTests(unittest.TestCase):
+    APPLY_OPERATION_NAMES = (
+        "apply_travel_right_fastest",
+        "apply_travel_right_fast",
+        "apply_travel_right_normal",
+        "apply_travel_right_slow",
+        "apply_travel_right_slowest",
+        "apply_in_place_right_normal",
+    )
+
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         root = Path(self.tempdir.name)
@@ -228,7 +395,11 @@ class WriterTests(unittest.TestCase):
             side_effect=AssertionError("resolved"),
         ):
             self.assertFalse(writer.preflight().physical)
+            self.assertFalse(writer.apply_travel_right_fastest().physical)
+            self.assertFalse(writer.apply_travel_right_fast().physical)
             self.assertFalse(writer.apply_travel_right_normal().physical)
+            self.assertFalse(writer.apply_travel_right_slow().physical)
+            self.assertFalse(writer.apply_travel_right_slowest().physical)
             self.assertFalse(writer.apply_in_place_right_normal().physical)
 
     def test_real_preflight_never_opens_hidraw(self) -> None:
@@ -248,8 +419,24 @@ class WriterTests(unittest.TestCase):
         state = alternating.AlternatingD47()
         operations = (
             (
+                self._writer().apply_travel_right_fastest,
+                state.travel_right_fastest_frame(),
+            ),
+            (
+                self._writer().apply_travel_right_fast,
+                state.travel_right_fast_frame(),
+            ),
+            (
                 self._writer().apply_travel_right_normal,
                 state.travel_right_normal_frame(),
+            ),
+            (
+                self._writer().apply_travel_right_slow,
+                state.travel_right_slow_frame(),
+            ),
+            (
+                self._writer().apply_travel_right_slowest,
+                state.travel_right_slowest_frame(),
             ),
             (
                 self._writer().apply_in_place_right_normal,
@@ -273,82 +460,101 @@ class WriterTests(unittest.TestCase):
             self.assertFalse(any(frame.startswith(b"\x26\x06") for frame in writes))
 
     def test_write_error_and_partial_write_are_never_retried(self) -> None:
-        for side_effect in (OSError("synthetic"), 511):
-            write = mock.Mock(
-                side_effect=side_effect
-                if isinstance(side_effect, OSError)
-                else None,
-                return_value=None if isinstance(side_effect, OSError) else side_effect,
-            )
-            with mock.patch.object(
-                alternating.os,
-                "open",
-                return_value=31,
-            ), mock.patch.object(
-                alternating.os,
-                "write",
-                write,
-            ), mock.patch.object(alternating.os, "close"):
-                with self.assertRaises(fixed.N9OperationError):
-                    self._writer().apply_travel_right_normal()
-            self.assertEqual(write.call_count, 1)
+        operation_names = (
+            "apply_travel_right_fastest",
+            "apply_travel_right_fast",
+            "apply_travel_right_normal",
+            "apply_travel_right_slow",
+            "apply_travel_right_slowest",
+        )
+        for operation_name in operation_names:
+            for side_effect in (OSError("synthetic"), 511):
+                write = mock.Mock(
+                    side_effect=side_effect
+                    if isinstance(side_effect, OSError)
+                    else None,
+                    return_value=(
+                        None if isinstance(side_effect, OSError) else side_effect
+                    ),
+                )
+                with self.subTest(
+                    operation=operation_name,
+                    side_effect=side_effect,
+                ), mock.patch.object(
+                    alternating.os,
+                    "open",
+                    return_value=31,
+                ), mock.patch.object(
+                    alternating.os,
+                    "write",
+                    write,
+                ), mock.patch.object(alternating.os, "close"):
+                    with self.assertRaises(fixed.N9OperationError):
+                        getattr(self._writer(), operation_name)()
+                self.assertEqual(write.call_count, 1)
 
     def test_missing_output_2a_fails_before_open_and_write(self) -> None:
         descriptor = self.sysfs / "hidraw4" / "device" / "report_descriptor"
         descriptor.write_bytes(_descriptor(include_2a=False))
-        with mock.patch.object(alternating.os, "open") as opened, mock.patch.object(
-            alternating.os,
-            "write",
-        ) as write:
-            with self.assertRaisesRegex(fixed.N9FixedError, "Output 0x2a"):
-                self._writer().apply_travel_right_normal()
-        opened.assert_not_called()
-        write.assert_not_called()
+        for operation_name in self.APPLY_OPERATION_NAMES:
+            with self.subTest(operation=operation_name), mock.patch.object(
+                alternating.os,
+                "open",
+            ) as opened, mock.patch.object(
+                alternating.os,
+                "write",
+            ) as write:
+                with self.assertRaisesRegex(fixed.N9FixedError, "Output 0x2a"):
+                    getattr(self._writer(), operation_name)()
+            opened.assert_not_called()
+            write.assert_not_called()
 
     def test_post_open_identity_failure_produces_zero_writes(self) -> None:
         wrong = types.SimpleNamespace(
             st_mode=stat.S_IFCHR | 0o600,
             st_rdev=os.makedev(240, 5),
         )
-        with mock.patch.object(
-            alternating.os,
-            "open",
-            return_value=31,
-        ), mock.patch.object(
-            fixed.os,
-            "fstat",
-            return_value=wrong,
-        ), mock.patch.object(
-            alternating.os,
-            "write",
-        ) as write, mock.patch.object(alternating.os, "close"):
-            with self.assertRaises(fixed.N9FixedError):
-                self._writer().apply_in_place_right_normal()
-        write.assert_not_called()
+        for operation_name in self.APPLY_OPERATION_NAMES:
+            with self.subTest(operation=operation_name), mock.patch.object(
+                alternating.os,
+                "open",
+                return_value=31,
+            ), mock.patch.object(
+                fixed.os,
+                "fstat",
+                return_value=wrong,
+            ), mock.patch.object(
+                alternating.os,
+                "write",
+            ) as write, mock.patch.object(alternating.os, "close"):
+                with self.assertRaises(fixed.N9FixedError):
+                    getattr(self._writer(), operation_name)()
+            write.assert_not_called()
 
     def test_output_2a_loss_after_open_produces_zero_writes(self) -> None:
         full_descriptor = _descriptor()
         fixed_only_descriptor = _descriptor(include_2a=False)
-        with mock.patch.object(
-            Path,
-            "read_bytes",
-            side_effect=[
-                full_descriptor,
-                full_descriptor,
-                full_descriptor,
-                fixed_only_descriptor,
-            ],
-        ), mock.patch.object(
-            alternating.os,
-            "open",
-            return_value=31,
-        ), mock.patch.object(
-            alternating.os,
-            "write",
-        ) as write, mock.patch.object(alternating.os, "close"):
-            with self.assertRaisesRegex(fixed.N9FixedError, "Output 0x2a"):
-                self._writer().apply_in_place_right_normal()
-        write.assert_not_called()
+        for operation_name in self.APPLY_OPERATION_NAMES:
+            with self.subTest(operation=operation_name), mock.patch.object(
+                Path,
+                "read_bytes",
+                side_effect=[
+                    full_descriptor,
+                    full_descriptor,
+                    full_descriptor,
+                    fixed_only_descriptor,
+                ],
+            ), mock.patch.object(
+                alternating.os,
+                "open",
+                return_value=31,
+            ), mock.patch.object(
+                alternating.os,
+                "write",
+            ) as write, mock.patch.object(alternating.os, "close"):
+                with self.assertRaisesRegex(fixed.N9FixedError, "Output 0x2a"):
+                    getattr(self._writer(), operation_name)()
+            write.assert_not_called()
 
     def test_mutated_constant_fails_before_lock_or_io(self) -> None:
         mutated = bytearray(
@@ -431,14 +637,30 @@ class CliTests(unittest.TestCase):
     def test_help_states_closed_scope(self) -> None:
         result = self.run_cli("--help")
         self.assertEqual(result.returncode, 0)
-        self.assertIn("exactly two captured D47", result.stdout)
+        self.assertIn("exactly captured D47, D49 and D50", result.stdout)
         self.assertIn("not a general 2a 04", result.stdout)
 
-    def test_offline_commands_require_three_distinct_exact_tokens(self) -> None:
+    def test_offline_commands_require_distinct_exact_tokens(self) -> None:
         cases = (
+            (
+                "apply-travel-right-fastest",
+                alternating.TRAVEL_RIGHT_FASTEST_CONFIRM_TOKEN,
+            ),
+            (
+                "apply-travel-right-fast",
+                alternating.TRAVEL_RIGHT_FAST_CONFIRM_TOKEN,
+            ),
             (
                 "apply-travel-right-normal",
                 alternating.TRAVEL_RIGHT_NORMAL_CONFIRM_TOKEN,
+            ),
+            (
+                "apply-travel-right-slow",
+                alternating.TRAVEL_RIGHT_SLOW_CONFIRM_TOKEN,
+            ),
+            (
+                "apply-travel-right-slowest",
+                alternating.TRAVEL_RIGHT_SLOWEST_CONFIRM_TOKEN,
             ),
             (
                 "apply-in-place-right-normal",
@@ -456,6 +678,16 @@ class CliTests(unittest.TestCase):
 
     def test_offline_preflight_and_apply_need_no_hardware(self) -> None:
         preflight = self.run_cli("--offline", "preflight")
+        fastest = self.run_cli(
+            "--offline",
+            "apply-travel-right-fastest",
+            alternating.TRAVEL_RIGHT_FASTEST_CONFIRM_TOKEN,
+        )
+        fast = self.run_cli(
+            "--offline",
+            "apply-travel-right-fast",
+            alternating.TRAVEL_RIGHT_FAST_CONFIRM_TOKEN,
+        )
         travel = self.run_cli(
             "--offline",
             "apply-travel-right-normal",
@@ -466,7 +698,17 @@ class CliTests(unittest.TestCase):
             "apply-in-place-right-normal",
             alternating.IN_PLACE_RIGHT_NORMAL_CONFIRM_TOKEN,
         )
-        for result in (preflight, travel, in_place):
+        slow = self.run_cli(
+            "--offline",
+            "apply-travel-right-slow",
+            alternating.TRAVEL_RIGHT_SLOW_CONFIRM_TOKEN,
+        )
+        slowest = self.run_cli(
+            "--offline",
+            "apply-travel-right-slowest",
+            alternating.TRAVEL_RIGHT_SLOWEST_CONFIRM_TOKEN,
+        )
+        for result in (preflight, fastest, fast, travel, slow, slowest, in_place):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("zero hidraw", result.stdout)
 
