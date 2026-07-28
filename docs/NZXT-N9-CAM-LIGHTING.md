@@ -923,10 +923,19 @@ physical description.
 The repository now has a closed, uninstalled D47 phase 1 laboratory that
 freezes only frame 1477 for travelling right at Normal and frame 3725 for
 switching in place at Normal. Their SHA-256 values are computed over the
-actual 512 binary bytes, not tshark text. The laboratory has offline test
-coverage but no physical QA yet. It does not expose the D48 through D51
-direction or speed observations, and any physical replay still requires a
-separately authorized supervised session followed by exact D32 restoration.
+actual 512 binary bytes, not tshark text.
+
+**Verified by the operator on 2026-07-27:** Linux resolved the N9 as
+`/dev/hidraw2`, verified the exact D32 frame from its private PCAP, passed the
+offline restore check, and passed real preflight at 71.0 C without opening
+hidraw. The closed laboratory sent frame 1477 once, observed it for 10
+seconds, and restored D32 successfully. It then passed another preflight at
+42.0 C, sent frame 3725 once, observed it for 10 seconds, and restored D32
+again. Final preflight passed at 63.0 C with no process retaining a hidraw
+handle. The operator confirmed that both effects looked correct and that fans
+and pump remained normal. This physical QA validates only those two exact D47
+replays and their D32 restorations on this board. The laboratory still does
+not expose or authorize any D48 through D51 direction or speed state.
 
 ### D48: direction and speed without propagation
 

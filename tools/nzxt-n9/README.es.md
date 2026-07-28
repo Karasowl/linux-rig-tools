@@ -171,11 +171,22 @@ Aplicar en modo real repite después de abrir las comprobaciones de identidad
 y Output Report `0x2a`, comparte el mismo lock exclusivo de escritura con
 Fixed y D35, y falla de forma cerrada tras un intento.
 
-Esta fase todavía no tiene QA físico. Quita `--offline` únicamente en una
-sesión de hardware supervisada y autorizada por separado, con la restauración
-D32 disponible de inmediato. Esta fase no incluye la dirección contraria,
-otra velocidad ni ningún estado de D48 a D51. Esas mediciones no se deben
-inferir ni exponer mediante este laboratorio.
+**Verificado por el operador el 27 de julio de 2026:** antes de cualquier
+escritura, Linux resolvió la N9 como `/dev/hidraw2`, verificó la trama exacta
+de restauración D32 desde su PCAP privada, completó la comprobación offline de
+la restauración D32 y pasó el preflight real a 71,0 C sin abrir hidraw. El
+laboratorio envió después la única trama congelada `travel-right-normal`, la
+observó durante 10 segundos y restauró D32 correctamente. Un segundo preflight
+pasó a 42,0 C, el laboratorio envió la única trama congelada
+`in-place-right-normal`, la observó durante 10 segundos y restauró D32 de
+nuevo. El preflight final pasó a 63,0 C y ningún proceso retuvo un handle de
+hidraw. El operador confirmó que ambos efectos se vieron correctamente y que
+los ventiladores y la bomba permanecieron normales.
+
+Este QA físico valida únicamente esas dos tramas D47 exactas y las dos
+restauraciones D32 en esta placa. No incluye ni autoriza la dirección
+contraria, otra velocidad ni ningún estado de D48 a D51. Esas mediciones no
+se deben inferir ni exponer mediante este laboratorio.
 
 ## Observaciones de iluminación de CAM
 

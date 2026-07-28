@@ -165,11 +165,21 @@ from the published D35 laboratory without opening hidraw. Real Apply repeats
 the identity and Output Report `0x2a` checks after open, shares the same
 exclusive write lock with Fixed and D35, and fails closed after one attempt.
 
-This phase has no physical QA yet. Remove `--offline` only in a separately
-authorized supervised hardware session with immediate D32 restoration
-available. This phase does not include the opposite direction, any other
-speed, or any D48 through D51 state. Those measurements must not be inferred
-or exposed through this laboratory.
+**Verified by the operator on 2026-07-27:** before any write, Linux resolved
+the N9 as `/dev/hidraw2`, verified the exact D32 restoration frame from its
+private PCAP, completed the offline D32 restoration check, and passed real
+preflight at 71.0 C without opening hidraw. The laboratory then sent the
+single frozen `travel-right-normal` frame, observed it for 10 seconds, and
+restored D32 successfully. A second preflight passed at 42.0 C, the laboratory
+sent the single frozen `in-place-right-normal` frame, observed it for 10
+seconds, and restored D32 again. The final preflight passed at 63.0 C and no
+process retained a hidraw handle. The operator confirmed that both effects
+looked correct and that fans and pump remained normal.
+
+This physical QA validates only those two exact D47 frames and the two D32
+restorations on this board. It does not include or authorize the opposite
+direction, any other speed, or any D48 through D51 state. Those measurements
+must not be inferred or exposed through this laboratory.
 
 ## CAM lighting observations
 
