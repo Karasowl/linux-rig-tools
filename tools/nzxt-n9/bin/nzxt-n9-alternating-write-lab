@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""Closed CLI for two exact NZXT N9 Alternating D47 frames."""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+TOOL_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(TOOL_ROOT / "lib"))
+
+from nzxt_n9_alternating import (  # noqa: E402
+    IN_PLACE_RIGHT_NORMAL_CONFIRM_TOKEN,
+    RESTORE_CONFIRM_TOKEN,
+    TRAVEL_RIGHT_NORMAL_CONFIRM_TOKEN,
+    AlternatingD47Writer,
+    OfflineAlternatingD47Writer,
+    offline_restore_d32,
+    real_restore_d32,
+)
+from nzxt_n9_fixed import N9FixedError  # noqa: E402
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="nzxt-n9-alternating-write-lab",
+        description=(
+            "Closed laboratory for exactly two captured D47 Alternating states "
+            "and typed D32 Fixed restoration. This is not a general 2a 04 "
+            "specification and does not replace physical QA."
+        ),
+    )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="validate frozen operations without resolving, opening or writing hidraw",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser(
+        "preflight",
+        help="validate both exact frames and target readiness without opening hidraw",
+    )
+    travel = commands.add_parser(
+        "apply-travel-right-normal",
+        help="send exactly one frozen D47 travelling-right Normal frame",
+    )
+    travel.add_argument("confirmation")
+    in_place = commands.add_parser(
+        "apply-in-place-right-normal",
+        help="send exactly one frozen D47 in-place-right Normal frame",
+    )
+    in_place.add_argument("confirmation")
+    restore = commands.add_parser(
+        "restore-d32",
+        help="delegate restoration to the existing typed Fixed D32 transaction",
+    )
+    restore.add_argument("confirmation")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "preflight":
+            if args.offline:
+                result = OfflineAlternatingD47Writer().preflight()
+                print("OK: %s" % result.detail)
+            else:
+                readiness = AlternatingD47Writer().preflight()
+                print(
+                    "OK: %s, CPU Package %.1f C, hidraw was not opened"
+                    % (readiness.node, readiness.temperature_c)
+                )
+            return 0
+
+        if args.command == "apply-travel-right-normal":
+            if args.confirmation != TRAVEL_RIGHT_NORMAL_CONFIRM_TOKEN:
+                parser.error(
+                    "apply-travel-right-normal requires the exact token %s"
+                    % TRAVEL_RIGHT_NORMAL_CONFIRM_TOKEN
+                )
+            writer = (
+                OfflineAlternatingD47Writer()
+                if args.offline
+                else AlternatingD47Writer()
+            )
+            print("OK: %s" % writer.apply_travel_right_normal().detail)
+            return 0
+
+        if args.command == "apply-in-place-right-normal":
+            if args.confirmation != IN_PLACE_RIGHT_NORMAL_CONFIRM_TOKEN:
+                parser.error(
+                    "apply-in-place-right-normal requires the exact token %s"
+                    % IN_PLACE_RIGHT_NORMAL_CONFIRM_TOKEN
+                )
+            writer = (
+                OfflineAlternatingD47Writer()
+                if args.offline
+                else AlternatingD47Writer()
+            )
+            print("OK: %s" % writer.apply_in_place_right_normal().detail)
+            return 0
+
+        if args.command == "restore-d32":
+            if args.confirmation != RESTORE_CONFIRM_TOKEN:
+                parser.error(
+                    "restore-d32 requires the exact token %s"
+                    % RESTORE_CONFIRM_TOKEN
+                )
+            result = offline_restore_d32() if args.offline else real_restore_d32()
+            print("OK: %s" % result.detail)
+            return 0
+    except (N9FixedError, ValueError) as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 1
+
+    parser.error("unsupported command")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

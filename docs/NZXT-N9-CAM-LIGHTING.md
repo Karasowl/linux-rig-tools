@@ -920,6 +920,14 @@ flagged the discrepancy and directed questions established the real
 behavior. A general acknowledgment is not a substitute for a directed
 physical description.
 
+The repository now has a closed, uninstalled D47 phase 1 laboratory that
+freezes only frame 1477 for travelling right at Normal and frame 3725 for
+switching in place at Normal. Their SHA-256 values are computed over the
+actual 512 binary bytes, not tshark text. The laboratory has offline test
+coverage but no physical QA yet. It does not expose the D48 through D51
+direction or speed observations, and any physical replay still requires a
+separately authorized supervised session followed by exact D32 restoration.
+
 ### D48: direction and speed without propagation
 
 A follow-up window on 2026-07-25 that closed both questions D47 left open,

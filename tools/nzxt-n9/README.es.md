@@ -136,6 +136,47 @@ la placa a Fixed. Este QA valida únicamente la repetición D35 congelada y la
 restauración D32 en esta placa. No autoriza otras tramas animadas ni parámetros
 inferidos.
 
+## Laboratorio de escritura Alternating D47 fase 1 (cerrado, no instalado)
+
+`bin/nzxt-n9-alternating-write-lab` es un arnés cerrado separado para dos
+tramas exactas de 512 bytes extraídas directamente de la captura privada D47.
+No es un encoder y no acepta como entrada payload, color, brillo, velocidad,
+dirección, modo, canal, número de LED ni ruta hidraw.
+
+Los únicos estados Alternating disponibles son:
+
+| Operación cerrada | Trama D47 | Velocidad observada | Byte 55 | SHA-256 binario |
+| --- | ---: | ---: | ---: | --- |
+| `travel-right-normal` | 1477 | 500 | `01` | `bb88f24351f7817582c5f591203c5cae3b4963ad4b6bb1e2fd244b56c9dee782` |
+| `in-place-right-normal` | 3725 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
+
+Ambas tramas llevan el modo `05`, los bytes de color capturados exactos
+`28 40 8b 00 61 00`, recuento de colores `02`, byte 57 `00` y bytes 58 y 59
+`31 04`. Cada operación Aplicar hace una escritura de 512 bytes sin commit,
+pausa, reintento ni segunda escritura. La restauración D32 delega en la
+transacción tipada Fixed ya publicada.
+
+```
+nzxt-n9-alternating-write-lab --offline preflight
+nzxt-n9-alternating-write-lab --offline apply-travel-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-TRAVEL-RIGHT-NORMAL
+nzxt-n9-alternating-write-lab --offline apply-in-place-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-IN-PLACE-RIGHT-NORMAL
+nzxt-n9-alternating-write-lab --offline restore-d32 I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED
+```
+
+El modo offline nunca resuelve, abre ni escribe hidraw para las dos
+operaciones D47. El preflight real reutiliza del laboratorio D35 publicado
+las comprobaciones de identidad HID exacta, descriptor, major:minor, nodo de
+caracteres directo, permiso de escritura y CPU Package sin abrir hidraw.
+Aplicar en modo real repite después de abrir las comprobaciones de identidad
+y Output Report `0x2a`, comparte el mismo lock exclusivo de escritura con
+Fixed y D35, y falla de forma cerrada tras un intento.
+
+Esta fase todavía no tiene QA físico. Quita `--offline` únicamente en una
+sesión de hardware supervisada y autorizada por separado, con la restauración
+D32 disponible de inmediato. Esta fase no incluye la dirección contraria,
+otra velocidad ni ningún estado de D48 a D51. Esas mediciones no se deben
+inferir ni exponer mediante este laboratorio.
+
 ## Observaciones de iluminación de CAM
 
 Las observaciones manuales de NZXT CAM para una placa N9 Z890, CAM 4.76.5 y

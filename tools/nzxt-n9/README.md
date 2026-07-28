@@ -131,6 +131,46 @@ subsequent typed D32 restoration completed successfully and returned the board
 to Fixed. This QA validates only the frozen D35 replay and D32 restore on this
 board. It does not authorize other animated frames or inferred parameters.
 
+## Alternating D47 phase 1 write lab (closed, not installed)
+
+`bin/nzxt-n9-alternating-write-lab` is a separate closed harness for two exact
+512-byte frames extracted directly from the private D47 capture. It is not an
+encoder and has no inputs for a payload, color, brightness, speed, direction,
+mode, channel, LED count or hidraw path.
+
+The only available Alternating states are:
+
+| Closed operation | D47 frame | Observed speed | Byte 55 | Binary SHA-256 |
+| --- | ---: | ---: | ---: | --- |
+| `travel-right-normal` | 1477 | 500 | `01` | `bb88f24351f7817582c5f591203c5cae3b4963ad4b6bb1e2fd244b56c9dee782` |
+| `in-place-right-normal` | 3725 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
+
+Both frames carry mode `05`, the exact captured color bytes
+`28 40 8b 00 61 00`, color count `02`, byte 57 `00`, and bytes 58 and 59
+`31 04`. Each Apply operation makes one 512-byte write with no commit, sleep,
+retry or second write. D32 restoration delegates to the already published
+typed Fixed transaction.
+
+```
+nzxt-n9-alternating-write-lab --offline preflight
+nzxt-n9-alternating-write-lab --offline apply-travel-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-TRAVEL-RIGHT-NORMAL
+nzxt-n9-alternating-write-lab --offline apply-in-place-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-IN-PLACE-RIGHT-NORMAL
+nzxt-n9-alternating-write-lab --offline restore-d32 I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED
+```
+
+Offline mode never resolves, opens or writes hidraw for the two D47
+operations. Real preflight uses the exact HID identity, descriptor,
+major:minor, direct character node, write permission and CPU Package checks
+from the published D35 laboratory without opening hidraw. Real Apply repeats
+the identity and Output Report `0x2a` checks after open, shares the same
+exclusive write lock with Fixed and D35, and fails closed after one attempt.
+
+This phase has no physical QA yet. Remove `--offline` only in a separately
+authorized supervised hardware session with immediate D32 restoration
+available. This phase does not include the opposite direction, any other
+speed, or any D48 through D51 state. Those measurements must not be inferred
+or exposed through this laboratory.
+
 ## CAM lighting observations
 
 Manual NZXT CAM observations for one N9 Z890 board, CAM 4.76.5, and Channel 6
