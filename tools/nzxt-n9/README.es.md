@@ -91,6 +91,51 @@ hardware pudo cambiar parcialmente. El siguiente Aplicar real vuelve a exigir
 las 49 zonas o una restauración D32 exitosa. Los fallos antes de la primera
 escritura no eliminan una base ya conocida.
 
+## Laboratorio de escritura Spectrum Wave D35 (cerrado, no instalado)
+
+`bin/nzxt-n9-animated-write-lab` es un arnés conservador separado para sesiones
+físicas autorizadas explícitamente. Solo puede validar o enviar la trama exacta
+D35 de `Spectrum Wave` de 512 bytes, o delegar la restauración a la API tipada
+Fixed D32 existente. No acepta escritura genérica, payload, color, brillo,
+velocidad, dirección, modo, canal, número de LED ni ruta hidraw.
+
+La trama congelada comienza con `2a 04 20 20 02 fa 00`, contiene `31 03` en
+los bytes 58 y 59, y tiene SHA-256
+`8b93db5f5b1552e93203d2e59be6734bae53c9d01b217f78744ab031603899ef`.
+Aplicarla hace exactamente una escritura de 512 bytes sin pausa, commit,
+reintento ni segunda escritura. Una escritura parcial o un error fallan de
+forma cerrada. La restauración usa `restore_d32_vector()` y `N9FixedWriter`,
+conservando la transacción Fixed de datos, pausa de 3 ms y commit.
+
+```
+nzxt-n9-animated-write-lab --offline preflight
+nzxt-n9-animated-write-lab --offline apply-spectrum-wave I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-SPECTRUM-WAVE-D35
+nzxt-n9-animated-write-lab --offline restore-d32 I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED
+```
+
+Quita `--offline` únicamente en una sesión de hardware supervisada y
+autorizada por separado. El preflight real resuelve la identidad HID fija, el
+descriptor, major:minor, el nodo de caracteres directo, el permiso de
+escritura y CPU Package por debajo de 85 C sin abrir hidraw. Apply usa el mismo
+lock no bloqueante que Fixed, repite todas las comprobaciones de identidad
+después de abrir y hace su única escritura. Las dos operaciones de escritura
+exigen tokens exactos y distintos.
+
+El modo offline nunca resuelve, abre ni escribe hidraw para D35. D32 offline
+lee y valida la captura privada, después usa el escritor offline Fixed
+existente. Un éxito offline solo es validación mecánica y no equivale a QA
+físico ni a una especificación general de `2a 04`, otros modos animados,
+parámetros o dispositivos.
+
+**Verificado por el operador el 27 de julio de 2026:** el preflight real
+resolvió `/dev/hidraw2` con CPU Package a 42,0 C sin abrir hidraw. El laboratorio
+hizo después su única escritura D35 exacta. El operador observó Spectrum Wave
+funcionando correctamente durante 10 segundos, con ventiladores y bomba
+normales. La restauración tipada D32 posterior terminó correctamente y devolvió
+la placa a Fixed. Este QA valida únicamente la repetición D35 congelada y la
+restauración D32 en esta placa. No autoriza otras tramas animadas ni parámetros
+inferidos.
+
 ## Observaciones de iluminación de CAM
 
 Las observaciones manuales de NZXT CAM para una placa N9 Z890, CAM 4.76.5 y
@@ -248,10 +293,11 @@ Implicación para Linux, como dirección de ingeniería y no como
 especificación: los modos de audio no pueden reproducirse con una escritura
 única. Necesitarían un demonio que transmita tramas `26 14` con cadencia de
 unos 30 ms. El mismo opcode es una ruta candidata para efectos propios en
-tiempo real sobre las 49 zonas renderizados en el host. Nada de esto autoriza
-escrituras: ninguna trama `2a 04`, `26 06` parametrizada o `26 14` es todavía
-una especificación segura de escritura. Los detalles y la evidencia por
-captura están en
+tiempo real sobre las 49 zonas renderizados en el host. Fuera del laboratorio
+D35 exacto y congelado anterior, nada de esto autoriza escrituras: ninguna
+otra trama `2a 04`, `26 06` parametrizada o `26 14` es todavía una
+especificación segura de escritura. Los detalles y la evidencia por captura
+están en
 [Observaciones de iluminación de NZXT CAM](../../docs/NZXT-N9-CAM-LIGHTING.md).
 
 ## Dispositivo

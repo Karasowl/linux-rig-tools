@@ -628,9 +628,20 @@ Proposed field map with evidence classification:
   `0x31` is 49 decimal, the `Fixed` zone count, which is a suggestive
   coincidence and nothing more.
 
-These captures decode observations only. They do not establish a safe write
-specification for animated modes, and no `2a 04` frame should be written to
-the device from them.
+These captures decode observations only. They do not establish a general safe
+write specification for animated modes. The repository's closed D35 laboratory
+may replay only the exact frozen D35 frame in a separately authorized physical
+session, with D32 Fixed restoration. No other `2a 04` frame or parameter is
+authorized by this evidence.
+
+**Verified by the operator on 2026-07-27:** Linux preflight resolved the N9 as
+`/dev/hidraw2`, validated the fixed identity and descriptor with CPU Package at
+42.0 C, and did not open hidraw. The closed laboratory then sent the single
+frozen D35 frame. The operator observed Spectrum Wave working correctly for 10
+seconds with fans and pump remaining normal. The typed D32 Fixed restoration
+completed successfully immediately afterward. This physical QA validates only
+that exact D35 replay and D32 restore on this board. It does not generalize any
+other animated frame, speed, direction, color, or unknown field.
 
 ## USB observations from D39 through D51, animated-mode campaign
 
@@ -1063,9 +1074,11 @@ rather than a repeat of a prior measurement. The state survived a VM shutdown
 and a device re-attach, which corroborates the brightness-baked-into-the-
 triples model with that limitation stated.
 
-These captures decode observations only. They do not establish a safe write
-specification for any animated or streamed mode, and no `2a 04`, `26 06`
-parameterized, or `26 14` frame should be written to the device from them.
+These captures decode observations only. They do not establish a general safe
+write specification for any animated or streamed mode. The only narrow
+exception is the exact frozen D35 replay in the closed laboratory described
+above. No other `2a 04`, parameterized `26 06`, or `26 14` frame is authorized
+by this evidence.
 
 ## Anomalies and open questions
 

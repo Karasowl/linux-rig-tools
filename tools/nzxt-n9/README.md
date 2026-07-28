@@ -88,6 +88,49 @@ hardware may have changed partially. The next real Apply again requires all 49
 zones or a successful D32 restore. Failures before the first write do not erase
 an already known base.
 
+## Spectrum Wave D35 write lab (closed, not installed)
+
+`bin/nzxt-n9-animated-write-lab` is a separate conservative harness for
+explicitly authorized physical sessions. It can only validate or send the
+exact 512-byte D35 `Spectrum Wave` frame, or delegate restoration to the
+existing typed D32 Fixed API. It has no generic write, payload, color,
+brightness, speed, direction, mode, channel, LED count, or hidraw-path input.
+
+The frozen frame begins `2a 04 20 20 02 fa 00`, has `31 03` at bytes 58 and
+59, and has SHA-256
+`8b93db5f5b1552e93203d2e59be6734bae53c9d01b217f78744ab031603899ef`.
+Applying it makes exactly one 512-byte write with no sleep, commit, retry, or
+second write. A partial write or error fails closed. Restoring uses
+`restore_d32_vector()` and `N9FixedWriter`, preserving the Fixed data, 3 ms
+gap, and commit transaction.
+
+```
+nzxt-n9-animated-write-lab --offline preflight
+nzxt-n9-animated-write-lab --offline apply-spectrum-wave I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-SPECTRUM-WAVE-D35
+nzxt-n9-animated-write-lab --offline restore-d32 I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED
+```
+
+Remove `--offline` only in a separately authorized supervised hardware
+session. Real preflight resolves the fixed HID identity, descriptor,
+major:minor, direct character node, write permission, and CPU Package below
+85 C without opening hidraw. Apply uses the same nonblocking device lock as
+Fixed, repeats all identity checks after open, and then makes its one write.
+The two write operations require distinct exact tokens.
+
+Offline mode never resolves, opens, or writes hidraw for D35. Offline D32 reads
+and validates the private capture, then uses the existing Fixed offline writer.
+An offline success is only mechanical validation and does not constitute
+physical QA or a general specification for `2a 04`, other animated modes,
+parameters, or devices.
+
+**Verified by the operator on 2026-07-27:** real preflight resolved
+`/dev/hidraw2` with CPU Package at 42.0 C without opening hidraw. The laboratory
+then made its single exact D35 write. The operator observed Spectrum Wave
+working correctly for 10 seconds with fans and pump remaining normal. The
+subsequent typed D32 restoration completed successfully and returned the board
+to Fixed. This QA validates only the frozen D35 replay and D32 restore on this
+board. It does not authorize other animated frames or inferred parameters.
+
 ## CAM lighting observations
 
 Manual NZXT CAM observations for one N9 Z890 board, CAM 4.76.5, and Channel 6
@@ -230,9 +273,9 @@ Implication for Linux, stated as engineering direction rather than a spec:
 the audio modes cannot be reproduced with a one-shot write. They would need
 a daemon streaming `26 14` frames at ~30 ms cadence. The same opcode is a
 candidate path for arbitrary host-rendered real-time effects on the 49
-zones. None of this authorizes writes: no `2a 04`, parameterized `26 06`,
-or `26 14` frame is a safe write specification yet. Details and per-capture
-evidence live in
+zones. Outside the exact frozen D35 laboratory above, none of this authorizes
+writes: no other `2a 04`, parameterized `26 06`, or `26 14` frame is a safe
+write specification yet. Details and per-capture evidence live in
 [NZXT CAM lighting observations](../../docs/NZXT-N9-CAM-LIGHTING.md).
 
 ## Device
