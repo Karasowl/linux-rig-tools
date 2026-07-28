@@ -632,7 +632,7 @@ These captures decode observations only. They do not establish a safe write
 specification for animated modes, and no `2a 04` frame should be written to
 the device from them.
 
-## USB observations from D39 through D46, animated-mode campaign
+## USB observations from D39 through D51, animated-mode campaign
 
 **Method.** Eight isolated captures on 2026-07-22 completed the enumeration of
 CAM's lighting modes and the first field decoding for Channel 6. D39 through
@@ -640,13 +640,21 @@ D42 were batch captures: the operator selected the announced modes in order
 with pauses longer than 12 seconds and touched no other control, so each write
 is attributed by announced order and timestamp. D43 through D45 were targeted
 single-variable captures (color list, LED size and direction, brightness and
-speed extremes). D46 was an exploratory window with a negative result. In
-every capture the N9 `1e71:2023` was device 7 on usbmon bus 3, target traffic
+speed extremes). D46 was an exploratory window with a negative result. D47
+through D51 are follow-up captures on 2026-07-25 and 26 that closed the
+fields this campaign left open: D47 under the announced single-action
+protocol, D48 only partly, D49 with a pre-registered numeric prediction, and
+D50 and D51 as confirmation windows with every value pre-registered plus
+internal controls. D50a is an aborted exploratory capture kept separately,
+whose reconstruction D50 then confirmed. Each carries its own attribution
+caveat, recorded below. In the eight 2026-07-22 captures the N9 `1e71:2023`
+was device 7 on usbmon bus 3; in D47 through D51, after a VM restart and a
+live re-attach, it was device 6 on the same bus. In every capture target traffic
 was isolated by exact device address, every host write completed with status
 0, and the controller answered each write within 3 ms with the known `ff 01`
-acknowledgment echoing the opcode at bytes 14 and 15. Verification for this
-section was re-run against the archived PCAPs (SHA-256 checked against the
-capture sidecars) by the decoding worker.
+acknowledgment echoing the opcode at bytes 14 and 15. Verification for the
+D39-D46 material was re-run against the archived PCAPs (SHA-256 checked
+against the capture sidecars) by the decoding worker.
 
 **Verified: three observed transport patterns.** The captured modes used
 three distinct write patterns, all through 512-byte interrupt OUT reports.
@@ -672,7 +680,7 @@ with UI labels noted only where the operator confirmed them.
 | `Fading` | `01` | 1 (D39) | 40 | 3 | `00` | `08` | `31 03` |
 | `Spectrum Wave` | `02` | 4 (D35-D38) | 250 `Normal`, 150 `Fast` | 0 | `00` right, `02` left | `00` | `31 03` |
 | `Covering Marquee` | `04` | 1 (D39) | 150 | 2 | `00` | `00` | `31 03` |
-| `Alternating` | `05` | 2 (D41, D44) | 500 `Normal` | 2 | `01`, `03` after direction change | `00` | `31 04` |
+| `Alternating` | `05` | 7 (D41, D44, D47-D51) | all five notches in both sub-modes: travelling 800/700/500/400/300, in place 1600/1300/1000/800/600 | 2 | all four measured: `00`, `01`, `02`, `03` | `00` | `31 04` |
 | `Pulse` | `06` | 1 (D39) | 15 | 1 | `00` | `08` | `31 03` |
 | `Breathing` | `07` | 3 (D39, D43, D45) | 40 `Slowest`, 20 `Normal`, 4 `Fastest` | 1 to 3 | `00` | `08` | `31 03` |
 | `Candle` | `08` | 1 (D41) | 50 | 1 | `00` | `00` | `31 03` |
@@ -704,8 +712,53 @@ windows.
   faster, **verified** by the Breathing extremes (`Slowest` 40, `Normal` 20,
   `Fastest` 4) plus the D36 physical acceleration. The scale is per mode
   (Breathing 40 to 4, Spectrum Wave 250 and 150, Alternating 500), so a speed
-  value is meaningless without its mode. Full ranges for modes other than
-  Breathing are **unknown**.
+  value is meaningless without its mode. It is also **per sub-mode**, so the
+  same UI notch maps to different raw values depending on byte 55 bit 0,
+  which is what produced the unexplained 1000 in D47.
+
+  The track has **exactly five positions** and saturates silently at **both
+  ends**: a further arrow press transmitted nothing at the slow extreme
+  (D50) or at the fast one (D51), with 48 and 31.8 seconds of tail ruling
+  out a late write. Both Alternating curves are now **complete and
+  verified**:
+
+  | Notch | No propagation (D51) | With propagation (D50) | Ratio |
+  | --- | ---: | ---: | ---: |
+  | slow extreme | 1600 | 800 | 2.000 |
+  | `Slow` | **1300** | 700 | **1.857** |
+  | `Normal` | 1000 | 500 | 2.000 |
+  | `Fast` | 800 | 400 | 2.000 |
+  | `Fastest` | 600 | 300 | 2.000 |
+
+  **The scale is a lookup table, not an interpolable function** (D50), and
+  the sub-mode relationship is **not a constant factor** (D51). The factor
+  of 2 holds exactly at four notches and breaks at `Slow`. Neither table
+  derives cleanly from the other: half of 1300 is 650, which is what a
+  piecewise-linear model predicted for the propagating `Slow`, where CAM
+  writes 700. They are **two independent tables** that happen to agree on a
+  factor of 2 at four points for **unknown** reasons.
+
+  Both windows pre-registered every value before capturing, D51 with three
+  internal controls measured in D48; all three reproduced exactly, so the
+  discrepant `Slow` is not a method artifact. Within a sub-mode the steps
+  are irregular too (+100, +100, **+200**, +100 with propagation), which
+  refuted the piecewise-linear and geometric candidates registered before
+  D50. A whole-range linear model and a constant-ratio geometric model were
+  already excluded by the measured `Normal`.
+
+  Consequence for a Linux implementation: speed is neither interpolable
+  within a sub-mode nor derivable between sub-modes. **Every mode and
+  sub-mode pair requires its five raw values transcribed from measurement.**
+  A projection would have written 1400 where the real value is 1300.
+
+  Scale **shape** is per mode: Alternating's `Fast` is 0.8x its `Normal`,
+  Spectrum Wave's is 0.6x its own (150 against 250, D36), and Breathing's
+  extremes are 2.0x and 0.2x. The two Alternating curves differ in shape
+  only at `Slow` (1.4x against 1.3x). Ranges for modes other than
+  Alternating are incomplete: Breathing has three of five notches and
+  Spectrum Wave two of five. Alternating is the only effect in the reported
+  matrix exposing a movement switch, so no second mode exists to test the
+  sub-mode behaviour against.
 - Byte 7: `00` in every frame except Candle, which carried `56` (86).
   Meaning **unknown**. Candle exposes no speed control in the UI yet its
   frame still carried 50 at bytes 5-6, also unexplained.
@@ -725,10 +778,20 @@ windows.
   **unknown**, compatible with but not proven equal to the Fixed family.
 - Byte 55: bit field. Bit 1 is direction, **verified in two modes**
   (Spectrum Wave `00` to `02` in D37, Alternating `01` to `03` in D44, the
-  only byte changed in both). Bit 0 as "movement switch on" is a
-  **hypothesis** awaiting the dedicated D47 toggle capture. Caution: Starry
-  Night also carried `01` although its UI exposes no movement switch, so
-  bit 0 may mean something else per mode.
+  only byte changed in both). Bit 0 is **spatial propagation**, verified in
+  D47 by toggling Alternating's movement switch: with `1` the alternation
+  travels along the array, with `0` the whole board switches colors in
+  place. It does **not** gate the animation itself, since the two colors
+  keep alternating either way. The earlier reading of bit 0 as "animation
+  running" is corrected. Caution: Starry Night carries `01` although its UI
+  exposes no movement switch, which is compatible with a mode that always
+  propagates but is not verified. D47 fixes the meaning for Alternating,
+  not for the whole family. The two bits are **independent and orthogonal**,
+  verified in D48 with all four Alternating combinations measured: `00` and
+  `02` without propagation, `01` and `03` with it. CAM keeps writing bit 1
+  when bit 0 is clear, so direction never stops being emitted; without
+  propagation its visible effect is only a phase inversion of an in-place
+  switch, which the operator described as hard to tell apart.
 - Byte 56: color count, **verified** (measured 0 through 3, follows the
   list length exactly, including after a deletion).
 - Byte 57: per-mode constant (`08` for Breathing, Fading and Pulse, `05`
@@ -806,11 +869,180 @@ In D42, the selection of `Monitor Temperature` plus its CPU source produced
 **zero writes** during the first 64.6 seconds of the window. In D46, a
 dedicated window, the operator's repeated attempts again produced **zero
 writes of any kind** (the only N9 traffic was 49 heartbeats), and the board
-visibly stayed in the previous Breathing state. The failure is in CAM before
+visibly stayed in the previous Breathing state. D47 adds a third independent
+observation on a different day and after a full VM restart: `Monitor
+Temperature` was the active effect for the first 34.6 seconds of that window
+and transmitted **zero writes**. The failure is in CAM before
 the USB layer, not a controller rejection, because nothing was transmitted.
 The orchestrator's hypothesis is a CAM issue with virtualized temperature
 sources. The mode's transport pattern remains **unknown** and a retry is
 pending.
+
+### D47: Alternating's movement switch
+
+A dedicated single-variable window captured on 2026-07-25, after the VM was
+restarted and the device re-attached, which re-enumerated the N9 as device 6
+on bus 3. PCAP SHA-256
+`191335602dd41483881020cf148fc966543d5c626fda1aa6671b77360399a12f`, 129.1
+seconds, **three** interrupt OUT writes and no commit, each acknowledged
+within 2.7 ms.
+
+The three writes are Alternating's selection frame, the movement switch
+turned off, and turned back on. The toggle changed **two** fields at once:
+byte 55 bit 0 from `1` to `0`, and the speed uint16 at bytes 5-6 from 500 to
+1000. The third frame is **byte-for-byte identical** to the first, so the
+off-and-on cycle leaves no residual state in the configuration frame.
+
+The operator's directed physical description resolves the attribution. With
+the switch off the two colors **keep alternating**, as a hard cut with no
+intermediate tones, and the whole board switches **in place**. With the
+switch on the alternation **travels along the board** in one direction. A
+period change cannot turn a directional sweep into an in-place blink, so the
+observed difference comes from the bit, and bytes 5-6 only carry each
+sub-mode's own period. Both values are real periods, because animation runs
+in either state.
+
+An earlier reading of this window, which assumed the animation stopped, was
+wrong and was corrected before it reached this document. The operator's
+general "done, as expected" was taken as confirmation of a stop; the operator
+flagged the discrepancy and directed questions established the real
+behavior. A general acknowledgment is not a substitute for a directed
+physical description.
+
+### D48: direction and speed without propagation
+
+A follow-up window on 2026-07-25 that closed both questions D47 left open,
+both inside Alternating with byte 55 bit 0 clear. **Nine** interrupt OUT
+writes, no commit, and across all nine frames **only three bytes vary**:
+5, 6 (speed) and 55. Colors, count, byte 57 and bytes 58-59 stayed frozen.
+
+| # | Action | t (s) | Byte 55 | Speed |
+| ---: | --- | ---: | --- | ---: |
+| 1 | movement off | 17.129 | `00` | 1000 |
+| 2 | direction left | 89.686 | `02` | 1000 |
+| 3 | direction right | 188.242 | `00` | 1000 |
+| 4 | direction left | 224.811 | `02` | 1000 |
+| 5 | movement on | 295.433 | `03` | 500 |
+| 6 | direction right | 322.542 | `01` | 500 |
+| 7 | movement off | 339.060 | `00` | 1000 |
+| 8 | speed `Slowest` | 485.616 | `00` | 1600 |
+| 9 | speed `Fastest` | 6576.395 | `00` | 600 |
+
+**CAM keeps writing bit 1 with bit 0 clear**, so direction never stops being
+emitted. The operator confirmed the direction control and the speed slider
+stay visible and enabled without propagation, and that a direction change is
+still visible but hard to tell apart, which matches inverting the phase of an
+in-place switch.
+
+**The unexplained 1000 of D47 is `Normal` on a different scale, not a
+sentinel.** The slider operates in both sub-modes. The operator never touched
+it between actions 5 and 7, yet the raw value moved 500 to 1000 and back:
+that is a remap of the same notch, not a speed change. Action 9 accelerated
+the alternation visibly, as expected for 1600 to 600.
+
+Byte 55 for Alternating is now complete with **all four states measured**,
+and bits 0 and 1 are independent.
+
+**Attribution caveat.** Only actions 1, 8 and 9 followed the announced
+single-action protocol. Actions 2 through 6 were operator-initiated
+exploration, narrated in order, so that stretch is attributed by narrated
+order and timestamp, a lower rigor than D43-D45. Three independent checks
+corroborate the mapping: the write count matches the narrated action count
+exactly, frames 1, 3 and 7 are byte-for-byte identical to each other as are
+frames 2 and 4, and the resulting values are consistent with a two-bit
+field. The 101-minute gap between actions 8 and 9 is an announced operator
+break with the capture running and no CAM interaction.
+
+### D49: the sub-mode factor, predicted before capture
+
+The first window in this campaign to register a **numeric prediction before
+capturing**. From D48's no-propagation scale and the known `Normal` 500 with
+propagation, a constant factor of 2 predicted `Slowest` 800 and `Fastest`
+300. Both were measured exactly, along with `Normal` 500 as a control against
+three earlier windows.
+
+Four writes for four announced gestures, and **only bytes 5-6 vary** across
+the window: byte 55 stays `01` throughout, so neither propagation nor
+direction moved. Frames 1 and 4 are **byte-for-byte identical**. They measure
+the same state reached two different ways, once by sub-mode remap without
+touching the slider and once by moving the slider from `Normal`, so the remap
+depends on neither path nor history.
+
+**Protocol deviation, recorded.** Gesture 2 arrived 7.7 seconds after gesture
+1, under the announced 12-second minimum. Attribution is unaffected since the
+writes are unambiguously separated, but the window did not meet its announced
+pause and is not described as if it had. **The physical confirmation for
+gesture 1 was not obtained**: the operator gave a general acknowledgment
+without describing whether the alternation resumed travelling. It is recorded
+as unconfirmed. The conclusions rest entirely on the trace and on the
+pre-registered prediction, but D49 cannot serve as additional physical
+confirmation of bit 0's meaning.
+
+### D50: the speed track is a table, not a formula
+
+A confirmation window on 2026-07-25. Every value was registered **before**
+capturing, including two internal controls whose values were already measured
+in independent windows. Five announced arrow presses produced **four** writes,
+and only bytes 5-6 varied.
+
+| Press | Notch | Predicted | Measured |
+| ---: | --- | ---: | ---: |
+| 1 | `Fast` | 400 | **400** |
+| 2 | `Normal` (control) | 500 | **500** |
+| 3 | `Slow` | 700 | **700** |
+| 4 | slow extreme (control) | 800 | **800** |
+| 5 | at the stop | no write | **no write** |
+
+Alternating's speed curve with propagation is therefore complete: 300, 400,
+500, 700, 800. Its steps are +100, +100, **+200**, +100, which **refutes**
+the two formulas registered beforehand (piecewise-linear predicted `Slow`
+650, per-half geometric predicted 632). The scale is a **lookup table**.
+
+The fifth press is the measurement of a negative: the control saturates at
+the extreme without transmitting, with 48 seconds of tail ruling out a late
+write, so the track has **exactly five positions** and none beyond. Before
+D50 this rested on the reported effect matrix and CAM's own enum, not on a
+measurement.
+
+This window confirms the exploratory reconstruction recorded in D50a, an
+aborted capture whose six writes were only examined after the orchestrator
+had wrongly stated it contained none. Its values, `Fast` 400 and `Slow` 700,
+were reconstructed from the values themselves rather than from an announced
+action log; D50 re-derives them under the announced protocol with controls.
+
+### D51: the sub-mode factor is not a rule
+
+A confirmation window on 2026-07-26 measuring the two notches D48 had left
+open in the non-propagating sub-mode. Six values pre-registered, **three of
+them internal controls** already measured in D48. Seven announced actions
+produced **five** writes, and only bytes 5-6 varied.
+
+| Action | Notch | Predicted | Measured |
+| --- | --- | ---: | ---: |
+| movement off | slow extreme | 1600 | **1600** (control) |
+| Right arrow | `Slow` | 1400 | **1300** |
+| Right arrow | `Normal` | 1000 | **1000** (control) |
+| Right arrow | `Fast` | 800 | **800** (control) |
+| Right arrow | `Fastest` | 600 | **600** (control) |
+| Right arrow at the stop | none | no write | **no write** |
+| refocus click | none | no write | **no write** |
+
+All three controls reproduced exactly, so the single discrepant value is a
+real measurement, not a method artifact. The prediction came from projecting
+the sub-mode factor of 2 across the whole scale; it holds at four notches
+and **fails at `Slow`**, refuting the factor as a general rule.
+
+Two negatives were also measured here: the refocus click after using the
+mouse on the movement switch transmitted nothing, confirming for the speed
+control what D45 observed only for brightness; and the press against the
+**fast** stop transmitted nothing, completing D50's result at the slow stop.
+
+Methodological note worth keeping. The two intermediate notches were omitted
+from the model during D48 and D49, and the orchestrator went as far as
+calling the scale complete with three of five points. The operator pointed
+out they were missing. `Slow` is precisely where the model breaks: a
+projection would have written 1400 into this document with no other evidence
+contradicting it.
 
 ### Cross-window reproducibility
 
@@ -819,6 +1051,17 @@ verified by SHA-256 of the extracted payloads: Breathing's selection frame
 (D39 and D43), Breathing's two-color state (D43 final and D45 first, so the
 list state persisted across sessions), Alternating's selection frame (D41
 and D44), and Marquee's 3-triple data frame (D39 and D44).
+
+D47 adds a fifth, weaker but wider check. Its Alternating frame matches D44's
+in mode, speed, flags, color count and bytes 57-59, and differs only in the
+four color bytes, `27 3e 89 5f` in D44 against `28 40 8b 61` in D47. Three of
+those four changes, `27` to `28`, `3e` to `40` and `89` to `8b`, are exactly
+the ones D45 measured for the 25-to-26 percent brightness step. The fourth,
+`5f` to `61`, was **not measured in D45**: Breathing's list there did not
+contain that component, so it is a change compatible with the same step
+rather than a repeat of a prior measurement. The state survived a VM shutdown
+and a device re-attach, which corroborates the brightness-baked-into-the-
+triples model with that limitation stated.
 
 These captures decode observations only. They do not establish a safe write
 specification for any animated or streamed mode, and no `2a 04`, `26 06`

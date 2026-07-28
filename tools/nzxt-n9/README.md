@@ -124,12 +124,13 @@ an effective multiplier around 0.069 in that candidate family. This is a fitted
 compatibility interval, not a confirmed formula. These captures do not prove
 one triple per LED, confirm a channel index, or establish safe write semantics.
 
-## Animated modes: decoded observations (D35-D46)
+## Animated modes: decoded observations (D35-D51)
 
 The D35-D38 series (2026-07-21/22) isolated `Spectrum Wave` with one human
 action per window. The D39-D46 campaign (2026-07-22) then enumerated every
 remaining CAM lighting mode and decoded the first fields, using attributable
-batch selections plus targeted single-variable captures. Everything below is
+batch selections plus targeted single-variable captures. D47 through D51
+(2026-07-25 and 26) closed the fields that campaign left open. Everything below is
 verified from the archived PCAPs unless labeled otherwise, for this board,
 CAM 4.76.5, and Channel 6.
 
@@ -173,8 +174,32 @@ Decoded `2a 04` fields, evidence-classified:
 - Bytes 5-6 speed: **verified** little-endian uint16 (Alternating `Normal`
   is 500), lower is faster (**verified** with Breathing `Slowest` 40,
   `Normal` 20, `Fastest` 4 plus the observed acceleration in D36). The
-  scale is **per mode**, so a value is meaningless without its mode. Ranges
-  for the other modes are uncaptured.
+  scale is **per mode and per sub-mode**, so a value is meaningless without
+  both. The track has **exactly five positions** and saturates silently at
+  **both ends** (D50 slow, D51 fast): a further arrow press transmits
+  nothing. Both Alternating curves are complete and verified, `Fastest` to
+  slow extreme: **300/400/500/700/800** with propagation and
+  **600/800/1000/1300/1600** without it.
+- The speed scale is a **lookup table, not an interpolable function** (D50),
+  and the sub-mode relationship is **not a constant factor** (D51). The
+  factor of 2 holds exactly at four notches and breaks at `Slow`
+  (700 against 1300, ratio 1.857). Neither table derives from the other:
+  half of 1300 is 650, which is what a piecewise-linear model predicted for
+  the propagating `Slow`, where CAM writes 700. Steps inside a sub-mode are
+  irregular too (+100, +100, **+200**, +100 with propagation), refuting the
+  piecewise-linear and geometric candidates registered before D50.
+- Both windows pre-registered every value before capturing; D51 carried
+  three internal controls from D48 and all three reproduced exactly, so the
+  discrepant `Slow` is a real measurement. **A Linux implementation must
+  transcribe five raw values per mode and per sub-mode**, with no
+  interpolation and no derivation between sub-modes. A projection would have
+  written 1400 where the real value is 1300.
+- Scale shape is per mode: Alternating's `Fast` is 0.8x its `Normal`,
+  Spectrum Wave's is 0.6x its own (150 against 250, D36), Breathing's
+  extremes are 2.0x and 0.2x. Alternating is the only effect exposing a
+  movement switch, so no second mode exists to test sub-mode behaviour
+  against. Other modes are incomplete: Breathing three of five notches,
+  Spectrum Wave two of five, the rest none.
 - Bytes 8+ color list: **verified** contiguous 3-byte entries in **R B G
   order** (pure red entered as `89 00 00`, pure blue as `00 89 00` at 25%),
   the reverse of Fixed's G R B. Byte 56 is the entry count, and deleting an
@@ -183,15 +208,21 @@ Decoded `2a 04` fields, evidence-classified:
   level matching the per-zone Fixed level at 25%. The exact quantizer is
   **unknown**.
 - Byte 55 bit field: bit 1 is direction, **verified in two modes**
-  (Spectrum Wave `00` to `02`, Alternating `01` to `03`). Bit 0 as the
-  movement switch is a **hypothesis** pending a dedicated toggle capture,
-  and Starry Night carried `01` without exposing that switch.
+  (Spectrum Wave `00` to `02`, Alternating `01` to `03`). Bit 0 is spatial
+  propagation, **verified in D47** with Alternating's movement switch: `1`
+  makes the alternation travel along the board, `0` makes the whole board
+  switch in place. It does not gate the animation, the two colors keep
+  alternating either way. Bits 0 and 1 are independent, **verified in D48**
+  with all four Alternating states measured, and CAM keeps writing bit 1
+  when bit 0 is clear. Starry Night carries `01` without exposing that
+  switch, which fits a mode that always propagates but is not verified.
 - Bytes 3, 7 (Candle carried `56`), 57, and 58-59 (`31 03`, but `31 04` in
   Alternating): meaning **unknown**.
 
 `Monitor Temperature` has a **verified negative result**: selecting it plus
-its CPU source transmitted zero frames in two separate windows (the board
-visibly kept its previous effect). The failure is in CAM before the USB
+its CPU source transmitted zero frames in three separate windows, the last of
+them on a different day and after a full VM restart (the board visibly kept
+its previous effect). The failure is in CAM before the USB
 layer, likely related to the virtualized temperature sources (**inference**).
 Its transport pattern is **unknown** and a retry is pending.
 

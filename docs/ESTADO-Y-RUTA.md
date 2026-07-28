@@ -535,7 +535,36 @@ archivados, con SHA-256 cotejado contra los sidecars.
 - La velocidad es un uint16 little endian en los bytes 5 y 6, demostrado por
   el Normal de Alternating con valor 500. Menor es más rápido, con los
   extremos de Breathing medidos: Slowest 40, Normal 20 y Fastest 4. La
-  escala es por modo, así que un valor no significa nada sin su modo.
+  escala es por modo y además por submodo, así que la misma muesca de la
+  interfaz se traduce a valores crudos distintos según el bit 0 del byte 55,
+  y eso explica el 1000 que D47 dejó sin resolver. La pista tiene
+  exactamente cinco posiciones y satura en silencio en sus dos extremos,
+  verificado en D50 (extremo lento) y D51 (extremo rápido): una pulsación
+  más no transmite nada, con 48 y 31,8 segundos de cola que descartan una
+  escritura tardía. Las dos curvas de Alternating están completas y
+  verificadas: con propagación 300, 400, 500, 700 y 800, y sin propagación
+  600, 800, 1000, 1300 y 1600, de Fastest al extremo lento.
+- La escala de velocidad es una tabla, no una función interpolable
+  (verificado en D50), y la relación entre submodos no es un factor
+  constante (verificado en D51). El factor 2 se cumple exacto en cuatro
+  muescas y se rompe en Slow, donde 700 y 1300 dan 1,857. Ninguna de las dos
+  tablas se deriva limpiamente de la otra: la mitad de 1300 es 650, que es
+  lo que predecía el modelo lineal por tramos para el Slow con propagación,
+  donde CAM escribe 700. Son dos tablas independientes que coinciden en un
+  factor 2 en cuatro puntos por razones desconocidas.
+- Dentro de un submodo los pasos también son irregulares: +100, +100, +200 y
+  +100 con propagación. Eso refutó las dos fórmulas candidatas registradas
+  antes de D50, la lineal por tramos que predecía Slow 650 y la geométrica
+  por mitades que predecía 632. El modelo lineal en todo el rango y el
+  geométrico de razón constante ya estaban excluidos por el Normal medido.
+- Consecuencia práctica para Linux: la velocidad no es interpolable dentro
+  de un submodo ni derivable entre submodos. Cada par de modo y submodo
+  exige transcribir sus cinco valores crudos medidos. Una proyección habría
+  escrito 1400 donde el valor real es 1300.
+- La forma de la escala es por modo: el Fast de Alternating es 0,8 veces su
+  Normal y el de Spectrum Wave 0,6 veces el suyo (150 frente a 250, D36). Los
+  extremos de Breathing son 2,0 y 0,2. Las dos curvas de Alternating
+  difieren en forma solo en Slow, 1,4 frente a 1,3.
 - La lista de colores empieza en el byte 8 con tripletas contiguas en orden
   R B G, ancladas en D43 con rojo puro `89 00 00` y azul puro `00 89 00` al
   25 por ciento. Es el orden inverso al G R B de Fixed. El byte 56 es el
@@ -544,9 +573,17 @@ archivados, con SHA-256 cotejado contra los sidecars.
   Un punto porcentual movió `27 3e 00` a `28 40 00` y `00 89 00` a
   `00 8b 00` sin tocar ningún otro byte.
 - El byte 55 es un campo de bits. El bit 1 es la dirección, verificado en
-  dos modos (Spectrum Wave `00` a `02`, Alternating `01` a `03`). Que el
-  bit 0 sea el interruptor de movimiento sigue siendo hipótesis para D47, y
-  Starry Night la complica porque lleva `01` sin exponer ese interruptor.
+  dos modos (Spectrum Wave `00` a `02`, Alternating `01` a `03`). El bit 0
+  es la propagación espacial, verificado en D47 con el interruptor de
+  movimiento de Alternating: con `1` la alternancia recorre la placa, con
+  `0` toda la placa conmuta en su sitio. No gobierna la animación, porque
+  los dos colores siguen alternando en ambos estados. Los dos bits son
+  independientes y ortogonales, verificado en D48 con los cuatro estados de
+  Alternating medidos (`00`, `01`, `02` y `03`). CAM sigue escribiendo el
+  bit 1 con el bit 0 apagado, así que la dirección nunca deja de emitirse. Sin
+  propagación su efecto visible se reduce a invertir la fase. Starry
+  Night lleva `01` sin exponer ese interruptor, lo que encaja con un modo
+  que siempre se propaga, pero no está verificado.
 - Marquee y Wave no usan la familia `2a`. Envían el vector `26 04` más un
   `26 06` parametrizado: byte 4 `02` y selector de efecto en el byte 5,
   `29` Marquee y `35` Wave, frente al `01 00` del commit constante de
@@ -814,12 +851,36 @@ modos de audio.
 
 Los pendientes concretos de iluminación, en orden natural:
 
-- D47, ya preparado: capturar el toggle real del interruptor de movimiento de
-  Alternating para resolver la hipótesis del bit 0 del byte 55, que la
-  observación de Starry Night dejó en duda.
 - Reintentar Temperature Monitor, quizá tras reiniciar CAM o con otra fuente
-  de temperatura, para determinar su patrón de transporte. Hoy tiene doble
-  resultado negativo en la VM y ninguna trama capturada.
+  de temperatura, para determinar su patrón de transporte. Hoy tiene triple
+  resultado negativo en la VM (D42, D46 y D47) y ninguna trama capturada.
+- Medir las cinco muescas de los modos distintos de Alternating. Hoy
+  Breathing tiene tres de cinco y Spectrum Wave dos de cinco, y el resto
+  ninguna. Tras D51 no cabe proyectarlas: hay que medirlas una a una.
+- Investigar la causa de la desviación de Slow entre submodos. Es compatible
+  con un redondeo de un periodo interno, con dos tablas escritas a mano en
+  CAM o con otra unidad en ese tramo. Nada de eso está probado.
+- Medir las escalas de velocidad de los modos distintos de Breathing y
+  Alternating. Son la mayoría y admiten una ventana en lote.
+
+Aparcado a propósito hasta terminar la decodificación, decidido el 25 de
+julio de 2026: la limpieza de los PCAP históricos grandes. `usbmon` captura
+el bus completo, así que D5 (271 MB), D6 (165 y 46 MB) y D42 (63 MB) llevan
+sobre todo tráfico de otros dispositivos. Existe
+`captures/nzxt-n9/filter-capture.sh`, que deriva el tráfico del dispositivo
+leyendo bus y device del sidecar de cada ventana, con dos guardas (al menos
+una escritura y volcado idéntico byte a byte) y sin borrar nunca. La poda es
+un comando aparte, bloqueado tras una verificación independiente. Cuando se
+retome, el dictamen sobre qué ventana admite poda debe ser externo: D5, D6 y
+`linux-passive` son exploración temprana cuyo objeto de estudio pudo ser el
+bus mismo, así que filtrarlas por dispositivo no es equivalente a filtrar una
+ventana de modos. D48 ya se podó el 25 de julio, con equivalencia verificada
+byte a byte y el hash del crudo conservado en su sidecar, pero sin esa
+verificación independiente.
+
+El factor 2 entre submodos no admite contraste en otro modo: Alternating es
+el único efecto de la matriz que expone interruptor de movimiento, así que
+está medido en el único sitio donde ese submodo existe.
 - Capturar los extremos de velocidad de los modos distintos de Breathing,
   que fijan el rango por modo del campo uint16.
 - Discriminar los parámetros restantes del `26 06` parametrizado y los bytes

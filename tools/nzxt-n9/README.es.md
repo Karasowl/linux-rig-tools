@@ -132,14 +132,16 @@ familia de candidatos. Este es un intervalo de compatibilidad ajustado, no
 una fórmula confirmada. Estas capturas no prueban un triplete por LED, no
 confirman un índice de canal ni establecen una semántica segura de escritura.
 
-## Modos animados: observaciones decodificadas (D35 a D46)
+## Modos animados: observaciones decodificadas (D35 a D51)
 
 La serie D35 a D38 (21 y 22 de julio de 2026) aisló `Spectrum Wave` con una
 sola acción humana por ventana. La campaña D39 a D46 (22 de julio de 2026)
 enumeró después todos los modos de iluminación restantes de CAM y decodificó
 los primeros campos, con selecciones en lote atribuibles y capturas dirigidas
-de una variable. Todo lo siguiente está verificado en los PCAPs archivados
-salvo que se etiquete otra cosa, para esta placa, CAM 4.76.5 y el Canal 6.
+de una variable. D47 a D51 (25 y 26 de julio de 2026) cerraron los campos que esa
+campaña dejó abiertos. Todo lo siguiente está verificado en los PCAPs
+archivados salvo que se etiquete otra cosa, para esta placa, CAM 4.76.5 y el
+Canal 6.
 
 **Tres patrones de transporte observados, verificados** (no es una
 clasificación completa: `Monitor Temperature` no transmitió nada en su
@@ -184,9 +186,35 @@ Campos decodificados de `2a 04`, clasificados por evidencia:
 - Bytes 5 y 6, velocidad: **verificado** uint16 little endian (el `Normal`
   de Alternating es 500), menor es más rápido (**verificado** con los
   extremos de Breathing, `Slowest` 40, `Normal` 20 y `Fastest` 4, más la
-  aceleración observada en D36). La escala es **por modo**, así que un valor
-  no significa nada sin su modo. Los rangos de los demás modos no están
-  capturados.
+  aceleración observada en D36). La escala es **por modo y por submodo**,
+  así que un valor no significa nada sin ambos. La pista tiene **exactamente
+  cinco posiciones** y satura en silencio en **sus dos extremos** (D50 el
+  lento, D51 el rápido): una pulsación más no transmite nada. Las dos curvas
+  de Alternating están completas y verificadas, de `Fastest` al extremo
+  lento: **300/400/500/700/800** con propagación y **600/800/1000/1300/1600**
+  sin ella.
+- La escala de velocidad es una **tabla, no una función interpolable** (D50),
+  y la relación entre submodos **no es un factor constante** (D51). El factor
+  2 se cumple exacto en cuatro muescas y se rompe en `Slow` (700 frente a
+  1300, razón 1,857). Ninguna tabla se deriva de la otra: la mitad de 1300 es
+  650, que es lo que predecía el modelo lineal por tramos para el `Slow` con
+  propagación, donde CAM escribe 700. Dentro de un submodo los pasos también
+  son irregulares (+100, +100, **+200** y +100 con propagación), lo que
+  refutó las candidatas lineal por tramos y geométrica registradas antes de
+  D50.
+- Ambas ventanas registraron todos los valores antes de capturar. D51 llevaba
+  tres controles internos de D48 y los tres se reprodujeron exactos, así que
+  el `Slow` discrepante es una medición real. **Una implementación en Linux
+  debe transcribir cinco valores crudos por modo y por submodo**, sin
+  interpolar y sin derivar entre submodos. Una proyección habría escrito 1400
+  donde el valor real es 1300.
+- La forma de la escala es por modo: el `Fast` de Alternating es 0,8 veces su
+  `Normal` y el de Spectrum Wave 0,6 veces el suyo (150 frente a 250, D36). Los
+  extremos de Breathing son 2,0 y 0,2. Alternating es el único efecto que
+  expone interruptor de movimiento, así que no hay un segundo modo donde
+  contrastar el comportamiento entre submodos. Los demás modos están
+  incompletos: Breathing tres muescas de cinco, Spectrum Wave dos de cinco y
+  el resto ninguna.
 - Bytes 8 en adelante, lista de colores: **verificado** que son entradas
   contiguas de 3 bytes en **orden R B G** (el rojo puro entró como
   `89 00 00` y el azul puro como `00 89 00` al 25 por ciento), el orden
@@ -197,15 +225,21 @@ Campos decodificados de `2a 04`, clasificados por evidencia:
   ciento. El cuantizador exacto es **desconocido**.
 - Byte 55, campo de bits: el bit 1 es la dirección, **verificado en dos
   modos** (Spectrum Wave de `00` a `02`, Alternating de `01` a `03`). El
-  bit 0 como interruptor de movimiento es una **hipótesis** pendiente de una
-  captura dedicada del toggle, y Starry Night llevó `01` sin exponer ese
-  interruptor.
+  bit 0 es la propagación espacial, **verificado en D47** con el interruptor
+  de movimiento de Alternating: con `1` la alternancia recorre la placa, con
+  `0` toda la placa conmuta en su sitio. No gobierna la animación, los dos
+  colores siguen alternando en ambos estados. Los bits 0 y 1 son
+  independientes, **verificado en D48** con los cuatro estados de
+  Alternating medidos, y CAM sigue escribiendo el bit 1 con el bit 0
+  apagado. Starry Night lleva `01` sin exponer ese interruptor, lo que
+  encaja con un modo que siempre se propaga, pero no está verificado.
 - Bytes 3, 7 (Candle llevó `56`), 57 y 58 a 59 (`31 03`, pero `31 04` en
   Alternating): significado **desconocido**.
 
 `Monitor Temperature` tiene un **resultado negativo verificado**: elegirlo
-junto a su fuente de CPU no transmitió ninguna trama en dos ventanas
-separadas (la placa conservó visiblemente el efecto anterior). El fallo está
+junto a su fuente de CPU no transmitió ninguna trama en tres ventanas
+separadas, la última en otro día y tras reiniciar por completo la VM (la
+placa conservó visiblemente el efecto anterior). El fallo está
 en CAM antes de la capa USB, probablemente ligado a las fuentes de
 temperatura virtualizadas (**inferencia**). Su patrón de transporte es
 **desconocido** y el reintento queda pendiente.
