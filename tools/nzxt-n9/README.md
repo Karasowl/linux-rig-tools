@@ -131,14 +131,15 @@ subsequent typed D32 restoration completed successfully and returned the board
 to Fixed. This QA validates only the frozen D35 replay and D32 restore on this
 board. It does not authorize other animated frames or inferred parameters.
 
-## Alternating D47, D49, D50 and D51 write lab (closed, not installed)
+## Alternating D47 to D51 write lab (closed, not installed)
 
-`bin/nzxt-n9-alternating-write-lab` is a separate closed harness for ten exact
-512-byte frames extracted directly from the private D47, D49, D50 and D51
-captures. They are the two complete measured speed tables of Alternating, five
-notches each: the travelling sub-mode and the in-place sub-mode. It is not an
-encoder and has no inputs for a payload, color, brightness, numeric speed,
-direction, mode, channel, LED count or hidraw path.
+`bin/nzxt-n9-alternating-write-lab` is a separate closed harness for twelve
+exact 512-byte frames extracted directly from the private D47, D48, D49, D50
+and D51 captures. Ten of them are the two complete measured speed tables of
+Alternating, five notches each, for the travelling and in-place sub-modes with
+the direction bit clear. The other two are the leftward Normal state of each
+sub-mode. It is not an encoder and has no inputs for a payload, color,
+brightness, numeric speed, direction, mode, channel, LED count or hidraw path.
 
 The only available Alternating states are:
 
@@ -154,6 +155,14 @@ The only available Alternating states are:
 | `in-place-right-normal` | D47 3725, D51 6865 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
 | `in-place-right-slow` | D51 6853 | 1300 | `00` | `af48e4a14b0357c3fec8d66c8016612d769d4112cb59b11156255f5faa833402` |
 | `in-place-right-slowest` | D51 6015 | 1600 | `00` | `77a1bb88ad9ae133a0eb6c35ead49d919481fad8c0781e80c7ca95f222a17fcb` |
+| `travel-left-normal` | D48 211 | 500 | `03` | `554c0bfe1967d71d44ff36011f9f7fa8ab19779cf034a29ada32a30cfd2e9b4a` |
+| `in-place-left-normal` | D48 65 and 161 | 1000 | `02` | `4b479c50d518531e3a5a34b2ea2c5cd220b6bb118b10e58cf1e590beb1a94bc0` |
+
+Byte 55 is a two-bit field, bit 0 propagation and bit 1 direction, and all
+four values are measured. Only the two rightward values carry a full speed
+table, because CAM was never swept leftward. Each leftward frame differs from
+an already physically validated rightward frame in **exactly one byte**, byte
+55, which is what makes them safe to freeze.
 
 The two tables are stored as **independent transcriptions**. D50 proved the
 scale is a lookup table rather than an interpolable function, and D51 proved
@@ -181,6 +190,8 @@ nzxt-n9-alternating-write-lab --offline apply-in-place-right-fast I-CONFIRM-1E71
 nzxt-n9-alternating-write-lab --offline apply-in-place-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-IN-PLACE-RIGHT-NORMAL
 nzxt-n9-alternating-write-lab --offline apply-in-place-right-slow I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-SLOW
 nzxt-n9-alternating-write-lab --offline apply-in-place-right-slowest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-SLOWEST
+nzxt-n9-alternating-write-lab --offline apply-travel-left-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D48-TRAVEL-LEFT-NORMAL
+nzxt-n9-alternating-write-lab --offline apply-in-place-left-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D48-IN-PLACE-LEFT-NORMAL
 nzxt-n9-alternating-write-lab --offline restore-d32 I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED
 ```
 
@@ -246,9 +257,25 @@ told the implementation and the review would otherwise share one author. The
 frame evidence, the offline suite and the physical QA are unaffected, but this
 unit has one less layer of scrutiny than the earlier ones.
 
-Both Alternating speed tables now have physical QA on this board. The
-laboratory does not expose the opposite direction or any D48 state, and no
-unmeasured state may be inferred.
+Both Alternating speed tables now have physical QA on this board.
+
+The two D48 leftward frames have mechanical and capture-level verification
+only and no physical QA yet. Their evidence was audited before freezing them.
+D48 is in fact the most cross-validated window in the series: six of its nine
+writes reproduce states frozen from D47, D49, D50 and D51 byte for byte, and
+the offline suite asserts the whole nine-write list, so those six act as
+standing controls. Its known weaknesses are recorded rather than smoothed
+over. The gesture attribution of that window is by narrated order instead of
+single announced action, `travel-left-normal` appears only once in it while
+`in-place-left-normal` appears twice identically, and the window archives a
+device-filtered derivative because the 480 MB raw was discarded after a
+byte-for-byte equivalence check. The direction naming does not rest on the
+narration: the two-bit field has all four values measured and the two
+rightward ones are already frozen and physically validated, so the remaining
+two are the leftward ones by elimination.
+
+No unmeasured state may be inferred, and no leftward speed other than Normal
+exists in any capture.
 
 ## CAM lighting observations
 

@@ -1,4 +1,4 @@
-"""All Alternating D47, D49 and D50 tests use fakes. Never open real hidraw."""
+"""All Alternating D47 to D51 tests use fakes. Never open real hidraw."""
 from __future__ import annotations
 
 import contextlib
@@ -76,6 +76,16 @@ APPLY_CLI_OPERATIONS = (
         "apply-in-place-right-slowest",
         alternating.IN_PLACE_RIGHT_SLOWEST_CONFIRM_TOKEN,
         "D51 in-place-right-slowest",
+    ),
+    (
+        "apply-travel-left-normal",
+        alternating.TRAVEL_LEFT_NORMAL_CONFIRM_TOKEN,
+        "D48 travel-left-normal",
+    ),
+    (
+        "apply-in-place-left-normal",
+        alternating.IN_PLACE_LEFT_NORMAL_CONFIRM_TOKEN,
+        "D48 in-place-left-normal",
     ),
 )
 
@@ -275,6 +285,18 @@ class FrameTests(unittest.TestCase):
                 alternating._IN_PLACE_RIGHT_SLOWEST_FRAME,
                 alternating.IN_PLACE_RIGHT_SLOWEST_SHA256,
                 "D51 in-place-right-slowest",
+            ),
+            (
+                state.in_place_left_normal_frame(),
+                alternating._IN_PLACE_LEFT_NORMAL_FRAME,
+                alternating.IN_PLACE_LEFT_NORMAL_SHA256,
+                "D48 in-place-left-normal",
+            ),
+            (
+                state.travel_left_normal_frame(),
+                alternating._TRAVEL_LEFT_NORMAL_FRAME,
+                alternating.TRAVEL_LEFT_NORMAL_SHA256,
+                "D48 travel-left-normal",
             ),
         )
         for original, expected, digest, label in cases:
@@ -498,6 +520,132 @@ class FrameTests(unittest.TestCase):
                 actual_frames.append((int(number), frame))
         self.assertEqual(actual_frames, expected_frames)
 
+    def test_private_d48_capture_matches_every_relevant_frame(self) -> None:
+        """D48 is the most cross-validated window in the series.
+
+        Six of its nine writes reproduce states frozen from D47, D49, D50 and
+        D51 byte for byte. Asserting the whole write list, not just the two
+        new leftward frames, turns those six into standing controls.
+        """
+        tshark = shutil.which("tshark")
+        if not alternating.D48_PCAP_PATH.is_file() or tshark is None:
+            self.skipTest("private D48 PCAP or tshark is unavailable")
+
+        self.assertEqual(
+            hashlib.sha256(alternating.D48_PCAP_PATH.read_bytes()).hexdigest(),
+            alternating.D48_PCAP_SHA256,
+        )
+        state = alternating.AlternatingD47()
+        in_place_right = state.in_place_right_normal_frame()
+        in_place_left = state.in_place_left_normal_frame()
+        expected_frames = [
+            (alternating.IN_PLACE_RIGHT_NORMAL_D48_FRAME_NUMBERS[0], in_place_right),
+            (alternating.IN_PLACE_LEFT_NORMAL_D48_FRAME_NUMBERS[0], in_place_left),
+            (alternating.IN_PLACE_RIGHT_NORMAL_D48_FRAME_NUMBERS[1], in_place_right),
+            (alternating.IN_PLACE_LEFT_NORMAL_D48_FRAME_NUMBERS[1], in_place_left),
+            (
+                alternating.TRAVEL_LEFT_NORMAL_D48_FRAME_NUMBER,
+                state.travel_left_normal_frame(),
+            ),
+            (
+                alternating.TRAVEL_RIGHT_NORMAL_D48_FRAME_NUMBER,
+                state.travel_right_normal_frame(),
+            ),
+            (alternating.IN_PLACE_RIGHT_NORMAL_D48_FRAME_NUMBERS[2], in_place_right),
+            (
+                alternating.IN_PLACE_RIGHT_SLOWEST_D48_FRAME_NUMBER,
+                state.in_place_right_slowest_frame(),
+            ),
+            (
+                alternating.IN_PLACE_RIGHT_FASTEST_D48_FRAME_NUMBER,
+                state.in_place_right_fastest_frame(),
+            ),
+        ]
+        result = subprocess.run(
+            [
+                tshark,
+                "-r",
+                str(alternating.D48_PCAP_PATH),
+                "-Y",
+                (
+                    "usb.bus_id == 3 && usb.device_address == 6 && "
+                    "usb.transfer_type == 0x01 && "
+                    "usb.endpoint_address.direction == 0 && usb.capdata"
+                ),
+                "-T",
+                "fields",
+                "-e",
+                "frame.number",
+                "-e",
+                "usb.capdata",
+            ],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        actual_frames = []
+        for line in result.stdout.splitlines():
+            number, hex_payload = line.split("\t", 1)
+            frame = bytes.fromhex(hex_payload)
+            if frame.startswith(bytes.fromhex("2a04")):
+                actual_frames.append((int(number), frame))
+        self.assertEqual(actual_frames, expected_frames)
+
+    def test_direction_bit_is_the_only_difference_from_a_validated_frame(self) -> None:
+        """Each leftward frame is one byte away from a frame already sent.
+
+        That is what makes D48 safe to freeze despite its weaker gesture
+        attribution. The captured bytes are not in question, only which
+        narrated gesture produced them, and the direction bit is the sole
+        difference from a rightward state already written to this board.
+        """
+        state = alternating.AlternatingD47()
+        pairs = (
+            (
+                state.in_place_left_normal_frame(),
+                state.in_place_right_normal_frame(),
+                0x02,
+                0x00,
+            ),
+            (
+                state.travel_left_normal_frame(),
+                state.travel_right_normal_frame(),
+                0x03,
+                0x01,
+            ),
+        )
+        for left, right, left_bits, right_bits in pairs:
+            with self.subTest(left_bits=left_bits):
+                self.assertEqual(
+                    [
+                        index
+                        for index, pair in enumerate(zip(left, right, strict=True))
+                        if pair[0] != pair[1]
+                    ],
+                    [55],
+                )
+                self.assertEqual(left[55], left_bits)
+                self.assertEqual(right[55], right_bits)
+                # Bit 1 is direction, bit 0 is propagation and must not move.
+                self.assertEqual(left[55] ^ right[55], 0b10)
+
+    def test_byte_55_has_all_four_measured_values(self) -> None:
+        """The two-bit field is complete, which is what names the directions.
+
+        The two rightward values are frozen and physically validated, so the
+        remaining two are the leftward ones by elimination inside a closed
+        field. The narrated gesture order agrees but is not load bearing.
+        """
+        state = alternating.AlternatingD47()
+        by_bits = {
+            state.in_place_right_normal_frame()[55]: "in-place right",
+            state.travel_right_normal_frame()[55]: "travelling right",
+            state.in_place_left_normal_frame()[55]: "in-place left",
+            state.travel_left_normal_frame()[55]: "travelling left",
+        }
+        self.assertEqual(sorted(by_bits), [0x00, 0x01, 0x02, 0x03])
+        self.assertEqual(len(set(by_bits.values())), 4)
+
     def test_repeated_controls_are_identical_across_d47_d49_and_d50(self) -> None:
         state = alternating.AlternatingD47()
         normal = state.travel_right_normal_frame()
@@ -602,6 +750,8 @@ class WriterTests(unittest.TestCase):
         "apply_in_place_right_normal",
         "apply_in_place_right_slow",
         "apply_in_place_right_slowest",
+        "apply_travel_left_normal",
+        "apply_in_place_left_normal",
     )
 
     def setUp(self) -> None:
@@ -659,6 +809,8 @@ class WriterTests(unittest.TestCase):
             self.assertFalse(writer.apply_in_place_right_normal().physical)
             self.assertFalse(writer.apply_in_place_right_slow().physical)
             self.assertFalse(writer.apply_in_place_right_slowest().physical)
+            self.assertFalse(writer.apply_travel_left_normal().physical)
+            self.assertFalse(writer.apply_in_place_left_normal().physical)
 
     def test_real_preflight_never_opens_hidraw(self) -> None:
         with mock.patch.object(
@@ -715,6 +867,14 @@ class WriterTests(unittest.TestCase):
             (
                 self._writer().apply_in_place_right_slowest,
                 state.in_place_right_slowest_frame(),
+            ),
+            (
+                self._writer().apply_travel_left_normal,
+                state.travel_left_normal_frame(),
+            ),
+            (
+                self._writer().apply_in_place_left_normal,
+                state.in_place_left_normal_frame(),
             ),
         )
         self.assertEqual(len(operations), len(self.APPLY_OPERATION_NAMES))
@@ -907,7 +1067,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         # argparse rewraps the description, so compare on collapsed whitespace.
         described = " ".join(result.stdout.split())
-        self.assertIn("exactly captured D47, D49, D50 and D51", described)
+        self.assertIn("exactly captured D47 to D51", described)
         self.assertIn("not a general 2a 04", described)
         self.assertIn("neither derives from the other", described)
 
@@ -952,6 +1112,14 @@ class CliTests(unittest.TestCase):
             (
                 "apply-in-place-right-slowest",
                 alternating.IN_PLACE_RIGHT_SLOWEST_CONFIRM_TOKEN,
+            ),
+            (
+                "apply-travel-left-normal",
+                alternating.TRAVEL_LEFT_NORMAL_CONFIRM_TOKEN,
+            ),
+            (
+                "apply-in-place-left-normal",
+                alternating.IN_PLACE_LEFT_NORMAL_CONFIRM_TOKEN,
             ),
             ("restore-d32", alternating.RESTORE_CONFIRM_TOKEN),
         )

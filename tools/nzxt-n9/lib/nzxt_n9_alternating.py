@@ -1,10 +1,14 @@
-"""Closed Alternating D47, D49, D50 and D51 laboratory operations for the N9.
+"""Closed Alternating D47 to D51 laboratory operations for the NZXT N9.
 
-Only exact 512-byte frames measured in D47, D49, D50 and D51 exist here. This
-module is not an encoder, does not expose arbitrary payloads and does not
-generalize the D48 observations. The two sub-mode speed tables are stored as
-independent transcriptions because D50 proved the scale is a lookup table and
-D51 proved one table does not derive from the other.
+Only exact 512-byte frames measured in D47, D48, D49, D50 and D51 exist here.
+This module is not an encoder and does not expose arbitrary payloads. The two
+sub-mode speed tables are stored as independent transcriptions because D50
+proved the scale is a lookup table and D51 proved one table does not derive
+from the other.
+
+Byte 55 is a two-bit field, bit 0 propagation and bit 1 direction, and all
+four of its values are measured. Only the two rightward values carry a full
+speed table, because CAM was never swept leftward.
 """
 from __future__ import annotations
 
@@ -41,6 +45,17 @@ D47_PCAP_PATH: Final = Path(
 D47_PCAP_SHA256: Final = (
     "191335602dd41483881020cf148fc966543d5c626fda1aa6671b77360399a12f"
 )
+D48_PCAP_PATH: Final = Path(
+    "/home/karasowl/vms/win11-cap/captures/nzxt-n9/"
+    "2026-07-25-d48-alternating-no-propagation-direction-speed/"
+    "alternating-no-propagation-direction-speed-n9-only.pcapng"
+)
+# D48 archives a device-filtered derivative, not the 480 MB raw capture. The
+# raw was discarded after a byte-for-byte equivalence check and its SHA-256
+# lives in the window's stopped.json sidecar. Every other window keeps its raw.
+D48_PCAP_SHA256: Final = (
+    "c0c2c12af0203347f7157712cd01de112fda0cf1fefb59133cab98a65f49915d"
+)
 D49_PCAP_PATH: Final = Path(
     "/home/karasowl/vms/win11-cap/captures/nzxt-n9/"
     "2026-07-25-d49-alternating-propagation-speed-extremes/"
@@ -68,6 +83,15 @@ D51_PCAP_SHA256: Final = (
 TRAVEL_RIGHT_NORMAL_FRAME_NUMBER: Final = 1477
 IN_PLACE_RIGHT_NORMAL_FRAME_NUMBER: Final = 3725
 IN_PLACE_RIGHT_SLOWEST_D51_FRAME_NUMBER: Final = 6015
+# D48 frame numbers. The two leftward states are new. The other six writes of
+# that window reproduce already frozen states byte for byte and are the
+# strongest cross-capture controls in the series.
+IN_PLACE_LEFT_NORMAL_D48_FRAME_NUMBERS: Final = (65, 161)
+TRAVEL_LEFT_NORMAL_D48_FRAME_NUMBER: Final = 211
+IN_PLACE_RIGHT_NORMAL_D48_FRAME_NUMBERS: Final = (13, 133, 247)
+TRAVEL_RIGHT_NORMAL_D48_FRAME_NUMBER: Final = 233
+IN_PLACE_RIGHT_SLOWEST_D48_FRAME_NUMBER: Final = 347
+IN_PLACE_RIGHT_FASTEST_D48_FRAME_NUMBER: Final = 4411
 IN_PLACE_RIGHT_SLOW_D51_FRAME_NUMBER: Final = 6853
 IN_PLACE_RIGHT_NORMAL_D51_FRAME_NUMBER: Final = 6865
 IN_PLACE_RIGHT_FAST_D51_FRAME_NUMBER: Final = 6885
@@ -109,6 +133,12 @@ IN_PLACE_RIGHT_SLOW_SHA256: Final = (
 IN_PLACE_RIGHT_SLOWEST_SHA256: Final = (
     "77a1bb88ad9ae133a0eb6c35ead49d919481fad8c0781e80c7ca95f222a17fcb"
 )
+IN_PLACE_LEFT_NORMAL_SHA256: Final = (
+    "4b479c50d518531e3a5a34b2ea2c5cd220b6bb118b10e58cf1e590beb1a94bc0"
+)
+TRAVEL_LEFT_NORMAL_SHA256: Final = (
+    "554c0bfe1967d71d44ff36011f9f7fa8ab19779cf034a29ada32a30cfd2e9b4a"
+)
 TRAVEL_RIGHT_FASTEST_CONFIRM_TOKEN: Final = (
     "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D49-"
     "TRAVEL-RIGHT-FASTEST"
@@ -148,6 +178,14 @@ IN_PLACE_RIGHT_SLOW_CONFIRM_TOKEN: Final = (
 IN_PLACE_RIGHT_SLOWEST_CONFIRM_TOKEN: Final = (
     "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-"
     "IN-PLACE-RIGHT-SLOWEST"
+)
+IN_PLACE_LEFT_NORMAL_CONFIRM_TOKEN: Final = (
+    "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D48-"
+    "IN-PLACE-LEFT-NORMAL"
+)
+TRAVEL_LEFT_NORMAL_CONFIRM_TOKEN: Final = (
+    "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D48-"
+    "TRAVEL-LEFT-NORMAL"
 )
 RESTORE_CONFIRM_TOKEN: Final = (
     "I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED"
@@ -217,6 +255,18 @@ _IN_PLACE_RIGHT_SLOW_FRAME: Final = bytes.fromhex(
 _IN_PLACE_RIGHT_SLOWEST_FRAME: Final = bytes.fromhex(
     "2a0420200540060028408b00610000000000000000000000000000000000000000000000000000000000000000000000"
     "000000000000000002003104"
+    + "00" * 452
+)
+# Leftward states. Byte 55 bit 1 is the direction bit. Each differs from an
+# already physically validated rightward frame in that single byte.
+_IN_PLACE_LEFT_NORMAL_FRAME: Final = bytes.fromhex(
+    "2a04202005e8030028408b00610000000000000000000000000000000000000000000000000000000000000000000000"
+    "000000000000000202003104"
+    + "00" * 452
+)
+_TRAVEL_LEFT_NORMAL_FRAME: Final = bytes.fromhex(
+    "2a04202005f4010028408b00610000000000000000000000000000000000000000000000000000000000000000000000"
+    "000000000000000302003104"
     + "00" * 452
 )
 
@@ -342,6 +392,26 @@ class AlternatingD47:
         )
         return frame
 
+    def in_place_left_normal_frame(self) -> bytes:
+        frame = bytes(_IN_PLACE_LEFT_NORMAL_FRAME)
+        _validate_exact_frame(
+            frame,
+            _IN_PLACE_LEFT_NORMAL_FRAME,
+            IN_PLACE_LEFT_NORMAL_SHA256,
+            "D48 in-place-left-normal",
+        )
+        return frame
+
+    def travel_left_normal_frame(self) -> bytes:
+        frame = bytes(_TRAVEL_LEFT_NORMAL_FRAME)
+        _validate_exact_frame(
+            frame,
+            _TRAVEL_LEFT_NORMAL_FRAME,
+            TRAVEL_LEFT_NORMAL_SHA256,
+            "D48 travel-left-normal",
+        )
+        return frame
+
     def validate_all(self) -> None:
         self.travel_right_fastest_frame()
         self.travel_right_fast_frame()
@@ -353,6 +423,8 @@ class AlternatingD47:
         self.in_place_right_normal_frame()
         self.in_place_right_slow_frame()
         self.in_place_right_slowest_frame()
+        self.in_place_left_normal_frame()
+        self.travel_left_normal_frame()
 
 
 class AlternatingD47Writer:
@@ -429,6 +501,18 @@ class AlternatingD47Writer:
         return self._apply(
             AlternatingD47().in_place_right_slowest_frame(),
             "D51 in-place-right-slowest",
+        )
+
+    def apply_in_place_left_normal(self) -> SendResult:
+        return self._apply(
+            AlternatingD47().in_place_left_normal_frame(),
+            "D48 in-place-left-normal",
+        )
+
+    def apply_travel_left_normal(self) -> SendResult:
+        return self._apply(
+            AlternatingD47().travel_left_normal_frame(),
+            "D48 travel-left-normal",
         )
 
     def _apply(self, frame: bytes, label: str) -> SendResult:
@@ -522,6 +606,22 @@ class AlternatingD47Writer:
                 frame,
                 _IN_PLACE_RIGHT_SLOWEST_FRAME,
                 IN_PLACE_RIGHT_SLOWEST_SHA256,
+                label,
+            )
+            return
+        if label == "D48 in-place-left-normal":
+            _validate_exact_frame(
+                frame,
+                _IN_PLACE_LEFT_NORMAL_FRAME,
+                IN_PLACE_LEFT_NORMAL_SHA256,
+                label,
+            )
+            return
+        if label == "D48 travel-left-normal":
+            _validate_exact_frame(
+                frame,
+                _TRAVEL_LEFT_NORMAL_FRAME,
+                TRAVEL_LEFT_NORMAL_SHA256,
                 label,
             )
             return
@@ -643,4 +743,18 @@ class OfflineAlternatingD47Writer:
         return SendResult(
             False,
             "offline D51 in-place-right-slowest validation, zero hidraw opens or writes",
+        )
+
+    def apply_in_place_left_normal(self) -> SendResult:
+        AlternatingD47().in_place_left_normal_frame()
+        return SendResult(
+            False,
+            "offline D48 in-place-left-normal validation, zero hidraw opens or writes",
+        )
+
+    def apply_travel_left_normal(self) -> SendResult:
+        AlternatingD47().travel_left_normal_frame()
+        return SendResult(
+            False,
+            "offline D48 travel-left-normal validation, zero hidraw opens or writes",
         )

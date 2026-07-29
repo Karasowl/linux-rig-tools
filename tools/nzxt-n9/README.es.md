@@ -136,14 +136,16 @@ la placa a Fixed. Este QA valida únicamente la repetición D35 congelada y la
 restauración D32 en esta placa. No autoriza otras tramas animadas ni parámetros
 inferidos.
 
-## Laboratorio de escritura Alternating D47, D49, D50 y D51 (cerrado, no instalado)
+## Laboratorio de escritura Alternating D47 a D51 (cerrado, no instalado)
 
-`bin/nzxt-n9-alternating-write-lab` es un arnés cerrado separado para diez
+`bin/nzxt-n9-alternating-write-lab` es un arnés cerrado separado para doce
 tramas exactas de 512 bytes extraídas directamente de las capturas privadas
-D47, D49, D50 y D51. Son las dos tablas de velocidad completas de Alternating,
-cinco muescas cada una: el submodo con desplazamiento y el submodo en
-posición. No es un encoder y no acepta como entrada payload, color, brillo,
-velocidad numérica, dirección, modo, canal, número de LED ni ruta hidraw.
+D47, D48, D49, D50 y D51. Diez son las dos tablas de velocidad completas de
+Alternating, cinco muescas cada una, para los submodos con desplazamiento y en
+posición con el bit de dirección apagado. Las otras dos son el estado Normal
+hacia la izquierda de cada submodo. No es un encoder y no acepta como entrada
+payload, color, brillo, velocidad numérica, dirección, modo, canal, número de
+LED ni ruta hidraw.
 
 Los únicos estados Alternating disponibles son:
 
@@ -159,6 +161,15 @@ Los únicos estados Alternating disponibles son:
 | `in-place-right-normal` | D47 3725, D51 6865 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
 | `in-place-right-slow` | D51 6853 | 1300 | `00` | `af48e4a14b0357c3fec8d66c8016612d769d4112cb59b11156255f5faa833402` |
 | `in-place-right-slowest` | D51 6015 | 1600 | `00` | `77a1bb88ad9ae133a0eb6c35ead49d919481fad8c0781e80c7ca95f222a17fcb` |
+| `travel-left-normal` | D48 211 | 500 | `03` | `554c0bfe1967d71d44ff36011f9f7fa8ab19779cf034a29ada32a30cfd2e9b4a` |
+| `in-place-left-normal` | D48 65 y 161 | 1000 | `02` | `4b479c50d518531e3a5a34b2ea2c5cd220b6bb118b10e58cf1e590beb1a94bc0` |
+
+El byte 55 es un campo de dos bits, el bit 0 la propagación y el bit 1 la
+dirección, y sus cuatro valores están medidos. Solo los dos valores hacia la
+derecha tienen tabla de velocidad completa, porque CAM nunca se barrió hacia la
+izquierda. Cada trama hacia la izquierda difiere de una trama hacia la derecha
+ya validada físicamente en **exactamente un byte**, el 55, y eso es lo que hace
+seguro congelarlas.
 
 Las dos tablas se guardan como **transcripciones independientes**. D50 demostró
 que la escala es una tabla y no una función interpolable, y D51 demostró que un
@@ -186,6 +197,8 @@ nzxt-n9-alternating-write-lab --offline apply-in-place-right-fast I-CONFIRM-1E71
 nzxt-n9-alternating-write-lab --offline apply-in-place-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-IN-PLACE-RIGHT-NORMAL
 nzxt-n9-alternating-write-lab --offline apply-in-place-right-slow I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-SLOW
 nzxt-n9-alternating-write-lab --offline apply-in-place-right-slowest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-SLOWEST
+nzxt-n9-alternating-write-lab --offline apply-travel-left-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D48-TRAVEL-LEFT-NORMAL
+nzxt-n9-alternating-write-lab --offline apply-in-place-left-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D48-IN-PLACE-LEFT-NORMAL
 nzxt-n9-alternating-write-lab --offline restore-d32 I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED
 ```
 
@@ -259,8 +272,24 @@ offline y el QA físico no se ven afectados, pero esta unidad tiene una capa
 menos de escrutinio que las anteriores.
 
 Las dos tablas de velocidad de Alternating ya tienen QA físico en esta placa.
-El laboratorio no expone la dirección contraria ni ningún estado D48, y no se
-debe inferir ningún estado no medido.
+
+Las dos tramas hacia la izquierda de D48 solo tienen verificación mecánica y de
+captura, y todavía no tienen QA físico. Su evidencia se auditó antes de
+congelarlas. D48 resultó ser la ventana más corroborada de la serie: seis de
+sus nueve escrituras reproducen byte a byte estados ya congelados de D47, D49,
+D50 y D51, y la suite offline comprueba la lista completa de las nueve, así que
+esas seis quedan como controles permanentes. Sus debilidades conocidas se
+registran en lugar de disimularse. La atribución de gestos de esa ventana es
+por orden narrado y no por acción única anunciada, `travel-left-normal` aparece
+una sola vez mientras que `in-place-left-normal` aparece dos veces idénticas, y
+la ventana archiva un derivado filtrado por dispositivo porque el crudo de
+480 MB se retiró tras comprobar equivalencia byte a byte. El nombre de la
+dirección no depende de la narración: el campo de dos bits tiene sus cuatro
+valores medidos y los dos de la derecha ya están congelados y validados
+físicamente, así que los otros dos son los de la izquierda por eliminación.
+
+No se debe inferir ningún estado no medido, y no existe en ninguna captura otra
+velocidad hacia la izquierda distinta de Normal.
 
 ## Observaciones de iluminación de CAM
 

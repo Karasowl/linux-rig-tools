@@ -1129,7 +1129,49 @@ switch, in both of its sub-modes.
 without an independent review by a second author. The operator waived that
 gate explicitly. The capture evidence, the offline suite and the physical QA
 stand on their own, but the implementation was not read by anyone other than
-its author. The laboratory still exposes no D48 direction state.
+its author.
+
+### D48 leftward states, frozen after an evidence audit
+
+The laboratory was finally widened to the two leftward Normal states, closing
+byte 55 with all four of its values available as named operations:
+
+| Operation | Canonical source frame | Byte 55 | Speed | Binary SHA-256 |
+| --- | --- | --- | ---: | --- |
+| `travel-left-normal` | D48 211 | `03` | 500 | `554c0bfe1967d71d44ff36011f9f7fa8ab19779cf034a29ada32a30cfd2e9b4a` |
+| `in-place-left-normal` | D48 65 and 161 | `02` | 1000 | `4b479c50d518531e3a5a34b2ea2c5cd220b6bb118b10e58cf1e590beb1a94bc0` |
+
+D48 was left for last because its gesture attribution is by narrated order
+rather than single announced action. An audit before freezing found that
+concern to be much narrower than assumed, and the window itself to be the
+**most cross-validated in the series**. Six of its nine writes reproduce, byte
+for byte, states already frozen from D47, D49, D50 and D51: three of
+`in-place-right-normal`, one of `travel-right-normal`, one of
+`in-place-right-slowest` and one of `in-place-right-fastest`. The offline
+suite asserts the whole nine-write list, so those six became standing
+controls. Across the nine writes only bytes 5, 6 and 55 vary.
+
+What makes the two new frames safe to freeze is that each differs from a frame
+already written to this board in **exactly one byte**. `02` differs from the
+validated `00` only at byte 55, and `03` differs from the validated `01` only
+at byte 55, in both cases only in bit 1.
+
+The direction naming does not rest on the narration either. Byte 55 is a
+closed two-bit field with all four values measured, and the two rightward ones
+are frozen, named and physically validated, so the remaining two are the
+leftward ones by elimination. The narrated order agrees with that reading but
+is not load bearing.
+
+Three weaknesses are recorded rather than smoothed over. The attribution of
+that window is weaker than D43 to D45. `travel-left-normal` appears only once
+in it, while `in-place-left-normal` appears twice identically. And D48
+archives a device-filtered derivative instead of its raw capture, because the
+480 MB original was discarded after a byte-for-byte equivalence check, with
+its SHA-256 kept in the window sidecar. Every other window keeps its raw.
+
+No leftward speed other than Normal exists in any capture, so the leftward
+sub-modes have no speed table and none may be inferred from the rightward
+ones. These two states have no physical QA yet.
 
 ### D51: the sub-mode factor is not a rule
 
