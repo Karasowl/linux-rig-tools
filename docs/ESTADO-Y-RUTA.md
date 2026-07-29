@@ -1,6 +1,6 @@
 # Estado, método y ruta del proyecto
 
-Actualizado: 22 de julio de 2026.
+Actualizado: 29 de julio de 2026.
 
 Este es el documento descriptivo vivo de `linux-rig-tools`. Explica qué se ha
 hecho, por qué se hizo, qué evidencia existe, qué falta y cómo se controla el
@@ -17,13 +17,28 @@ siguen el AIO Cooler Master, la matriz LED del chasis y los demás dispositivos
 sin soporte.
 
 El avance actual ya supera la fase de reconocimiento. Existe un laboratorio
-Windows reproducible, capturas USB aisladas, una parte importante del protocolo
-de iluminación fija del N9 está decodificada y la primera escritura física
-desde Linux ya fue reversible. También hay dos herramientas generales seguras:
+Windows reproducible, capturas USB aisladas, la iluminación fija del N9 está
+decodificada y validada físicamente, y la decodificación avanzó hasta los
+modos animados, con tres laboratorios de escritura cerrados que ya pasaron QA
+físico en la placa de referencia.
+
+Herramientas generales seguras:
 
 - `nzxt-n9 status`, que abre el dispositivo en solo lectura y decodifica su
   heartbeat.
+- `nzxt-n9 find`, que resuelve el nodo hidraw por identidad HID exacta.
 - `nzxt-n9 encode`, que construye tramas en memoria y nunca las transmite.
+
+Superficies de laboratorio, ninguna instalada en el sistema:
+
+- `nzxt-n9-lab`, interfaz PyQt6 del vector Fixed de 49 zonas.
+- `nzxt-n9-first-write-lab`, arnés de la primera escritura Fixed.
+- `nzxt-n9-animated-write-lab`, arnés de la trama Spectrum Wave D35.
+- `nzxt-n9-alternating-write-lab`, arnés de seis tramas Alternating exactas
+  de D47, D49 y D50.
+
+Las tres bibliotecas del N9 y sus arneses están cubiertos por 104 pruebas
+offline en `tools/nzxt-n9/tests/`.
 
 El 21 de julio de 2026 Linux completó dos ciclos de iluminación integrada de la
 N9. En ambos cambió al instante a rojo tenue y restauró al instante su cian
@@ -38,12 +53,32 @@ laboratorio `tools/nzxt-n9/bin/nzxt-n9-first-write-lab`, con pruebas offline y
 evidencia descriptiva. No es una API genérica y no está instalado en el
 sistema.
 
+Después del primer hito, Linux también reprodujo físicamente tramas de modos
+animados. Estados con QA físico aprobado por el operador y publicados en
+`master`:
+
+| Estado | Fecha del QA | Origen |
+| --- | --- | --- |
+| Spectrum Wave, entrada desde Fixed | 27 de julio de 2026 | D35 |
+| Alternating con desplazamiento, Normal | 27 de julio de 2026 | D47 |
+| Alternating en posición, Normal | 27 de julio de 2026 | D47 |
+| Alternating con desplazamiento, Fastest 300 | 29 de julio de 2026 | D49 |
+| Alternating con desplazamiento, Fast 400 | 29 de julio de 2026 | D50 |
+| Alternating con desplazamiento, Slow 700 | 29 de julio de 2026 | D50 |
+| Alternating con desplazamiento, Slowest 800 | 29 de julio de 2026 | D49 |
+
+Cada uno es una trama capturada completa de 512 bytes, anclada por SHA-256 y
+enviada una sola vez, con restauración D32 posterior. No existe encoder de
+modos animados ni ninguna especificación de campos apta para escribir.
+
 Desde el estado actual faltan:
 
 - Seis de las siete macroetapas del objetivo final del proyecto, control útil
   desde Linux de todo el hardware objetivo, con integración, empaquetado y
   aportes a proyectos upstream. La Macroetapa 1, iluminación fija del N9, ya
-  está completa.
+  está completa, y la Macroetapa 2, iluminación completa del N9, está en curso
+  con la enumeración de modos cerrada y la reproducción por trama congelada
+  demostrada.
 
 ## Cómo se clasifican las afirmaciones
 
@@ -617,6 +652,56 @@ Los detalles por captura están en los archivos D39-ANALYSIS.md a
 D46-ANALYSIS.md junto a las capturas privadas, y el mapa consolidado de
 campos está en [NZXT-N9-CAM-LIGHTING.md](NZXT-N9-CAM-LIGHTING.md).
 
+### 17. Laboratorios de escritura de modos animados y su QA físico
+
+**Hechos verificados entre el 27 y el 29 de julio de 2026.**
+
+La decodificación de los modos animados dejó claro que sus campos todavía no
+son una especificación segura. Para poder demostrar control físico sin
+inventar bytes se adoptó un patrón distinto del encoder de Fixed: congelar la
+trama capturada completa y exponerla como una operación con nombre.
+
+**Regla del patrón.** Cada operación de un laboratorio de escritura envía un
+payload de 512 bytes extraído de una PCAP privada y anclado por su SHA-256.
+No hay encoder, interpolación, parámetro libre ni síntesis por campos. La
+operación no acepta color, brillo, velocidad numérica, dirección, canal ni
+ruta hidraw. Aplicar realiza una única escritura, sin reintento, sin pausa y
+sin segunda escritura, bajo el mismo lock exclusivo que Fixed. Toda operación
+va acompañada de la restauración exacta D32.
+
+**Artefactos:**
+
+- `nzxt-n9-animated-write-lab`, una sola operación con la trama D35 de entrada
+  a Spectrum Wave.
+- `nzxt-n9-alternating-write-lab`, seis operaciones con tramas exactas de D47,
+  D49 y D50: las cinco velocidades con desplazamiento hacia la derecha y el
+  estado en posición Normal.
+
+**Método de cada unidad.** Implementación en un worktree aislado sobre el
+commit publicado, revisión independiente por otro modelo con permiso para
+reextraer las PCAP y ejecutar la suite, y solo después un ciclo físico
+autorizado explícitamente por Ismael, con observación humana de iluminación,
+bomba y ventiladores, y restauración D32 entre estados.
+
+**Resultado.** Los siete estados de la tabla del resumen ejecutivo se
+comportaron como se esperaba. Las cuatro velocidades nuevas se vieron como
+velocidades claramente distintas del mismo efecto, en el orden previsto. En
+ningún ciclo se observó anomalía de refrigeración, las temperaturas se
+mantuvieron muy por debajo de la puerta de 85 grados Celsius y el nodo hidraw
+quedó siempre libre al terminar.
+
+**Límite importante.** Este QA valida esas tramas exactas en esta placa. No
+valida los campos que las componen, no autoriza estados no medidos y no
+convierte la velocidad en un parámetro. La escala de velocidad es una tabla
+medida y no una función, verificado en D50 y D51, así que cada muesca nueva
+exige su propia captura.
+
+**Nota operativa verificada el 29 de julio de 2026:** entre sesiones el N9
+cambió de `/dev/hidraw2` a `/dev/hidraw3`. Ningún laboratorio se vio afectado
+porque todos resuelven el nodo por identidad HID exacta. Las menciones a un
+número de hidraw concreto en la documentación son registros históricos de
+cada sesión, no configuración.
+
 ## Técnicas usadas y qué esperamos obtener de cada una
 
 | Técnica | Para qué se usa | Qué ha producido | Qué esperamos obtener después |
@@ -624,13 +709,14 @@ campos está en [NZXT-N9-CAM-LIGHTING.md](NZXT-N9-CAM-LIGHTING.md).
 | Inventario con sysfs, `lsusb`, hidraw y sensores | Identificar el hardware real y sus límites | VID, PID, interfaces y ausencia de PWM Linux | Detección estable sin depender de números de bus o hidraw |
 | QEMU/KVM y passthrough USB | Ejecutar las aplicaciones oficiales contra el hardware real | Laboratorio Windows reproducible | Capturar Cooling, efectos y dispositivos restantes |
 | `usbmon`, tshark y PCAP | Observar bytes sin escribir desde Linux | Handshake, heartbeat y tramas de iluminación | Descubrir telemetría, canales, efectos y controles |
-| Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D46 con acciones aisladas o lotes atribuibles | Reducir falsos positivos y establecer causalidad más fuerte |
+| Experimentos diferenciales | Relacionar una acción con una diferencia de tráfico | Series D1 a D51 con acciones aisladas o lotes atribuibles | Reducir falsos positivos y establecer causalidad más fuerte |
 | Repetición byte por byte | Separar coincidencias de comportamiento reproducible | Repetición de brillo y colores mixtos | Tramas doradas para pruebas automáticas |
 | Pruebas discriminantes | Refutar fórmulas que coinciden por accidente | El modelo sobrevivió D22, D24 y una escritura física inédita D25. D26 a D32 aislaron estado y límites por zona | Usar el laboratorio Fixed para detectar cruces que difieran de la tesis por zona |
 | Análisis del descriptor HID | Resolver formato y dirección de reportes | Report ID `0x26`, longitud 512 y ausencia de Feature reports | Construir escrituras con la forma correcta |
 | Análisis estático de CAM | Buscar nombres, PID, tablas y pistas no visibles en PCAP | Referencias N7 y N9, lógica nativa localizada | Acotar opcodes o transformaciones que las capturas no distinguen |
-| Codificación offline | Probar la implementación sin tocar hardware | Encoder compatible con 9 colores, 12 brillos, D22, D24 y D25, más un laboratorio Fixed cubierto por 59 pruebas | Extender el mismo enfoque a cada modo siguiente |
-| Revisión independiente | Intentar refutar hallazgos antes de integrarlos | Correcciones de telemetría, formato HID, concurrencia, estado físico y documentación | Evitar que una inferencia de un solo análisis se convierta en driver |
+| Codificación offline | Probar la implementación sin tocar hardware | Encoder compatible con 9 colores, 12 brillos, D22, D24 y D25, más los tres laboratorios del N9 cubiertos por 104 pruebas | Extender el mismo enfoque a cada modo siguiente |
+| Trama congelada por SHA-256 | Demostrar control físico de un modo cuyos campos aún no son especificación | Siete estados animados reproducidos y revertidos, sin encoder ni parámetros | Aplicarlo a cada tabla nueva hasta que los campos estén demostrados |
+| Revisión independiente | Intentar refutar hallazgos antes de integrarlos | Correcciones de telemetría, formato HID, concurrencia, estado físico y documentación, y una puerta obligatoria por unidad antes del QA físico | Evitar que una inferencia de un solo análisis se convierta en driver |
 
 ## Modelo técnico actual del N9
 
@@ -680,6 +766,12 @@ campos está en [NZXT-N9-CAM-LIGHTING.md](NZXT-N9-CAM-LIGHTING.md).
   Temperature Monitor no llegó a transmitir en la VM. Ningún campo de
   `2a 04`, `26 06` parametrizado o `26 14` es todavía una especificación
   segura de escritura.
+- Linux ya reprodujo físicamente siete estados de modos animados enviando la
+  trama `2a 04` capturada completa y anclada por SHA-256, con restauración
+  D32 posterior. Eso demuestra que la familia `2a 04` se puede escribir desde
+  Linux sin commit y sin efectos colaterales observados, pero no valida
+  ninguno de sus campos por separado. La distinción es la que separa
+  reproducir una medición de tener una especificación.
 
 ## Primer hito (cerrado)
 
@@ -758,14 +850,26 @@ Las cuatro etapas del primer hito están completas en el arnés de laboratorio.
 Ampliar color, brillo, canal y mapeo físico es trabajo posterior, sin romper
 las puertas de seguridad ya demostradas.
 
-### Macroetapa 2. Iluminación completa del N9
+### Macroetapa 2. Iluminación completa del N9, en curso
 
-- Identificar canales y superficies físicas.
-- Capturar y decodificar efectos animados.
+- Capturar y decodificar efectos animados. **Hecho en su enumeración:** los
+  catorce modos de firmware, Marquee, Wave y los dos modos de audio están
+  identificados, y los campos principales de `2a 04` están clasificados.
 - Determinar si los efectos viven en firmware o si CAM transmite frames
-  continuamente.
-- Anclar brillo en más de un porcentaje.
-- Añadir selección segura de color, brillo y canal.
+  continuamente. **Hecho:** catorce modos viven en firmware con una sola
+  trama por acción, y solo los modos de audio son streaming del host.
+- Anclar brillo en más de un porcentaje. **Hecho:** el brillo de los modos
+  animados va horneado en las tripletas de la lista de colores, anclado con
+  cambios de un punto porcentual.
+- Demostrar escritura física de modos animados. **Hecho por trama congelada:**
+  siete estados reproducidos y revertidos, sin encoder.
+- Identificar canales y superficies físicas. **Pendiente.**
+- Completar las tablas de velocidad medidas por modo y submodo.
+  **Pendiente:** solo Alternating tiene sus dos curvas completas.
+- Resolver los bytes sin semántica de `2a 04` (3, 7, 57 y 58 a 59) y los
+  parámetros restantes del `26 06` parametrizado. **Pendiente.**
+- Añadir selección segura de color, brillo y canal para modos animados.
+  **Pendiente y bloqueado** hasta que los campos dejen de ser inferencias.
 
 ### Macroetapa 3. Refrigeración del N9
 
@@ -838,8 +942,17 @@ primero la iluminación con todo su alcance y abordar refrigeración después.
 Hasta entonces, el arnés de iluminación debe seguir siendo de laboratorio:
 tramas congeladas, sin parámetros libres y sin empaquetado de sistema. No se
 debe ampliar a Cooling, firmware, duty ni curvas sin capturas nuevas y
-supervisión física, y ningún campo de `2a 04`, `26 06` parametrizado o
-`26 14` debe escribirse al dispositivo desde estas capturas.
+supervisión física.
+
+La regla sobre los modos animados es más precisa desde los laboratorios de
+escritura, así que conviene enunciarla sin ambigüedad. Está permitido enviar
+una trama `2a 04` capturada completa, anclada por SHA-256 y expuesta como
+operación con nombre, siempre bajo autorización explícita y con restauración
+D32 disponible. Está prohibido construir una trama a partir de sus campos,
+interpolar una velocidad, derivar una tabla de otra o exponer un parámetro
+libre. Ningún campo de `2a 04`, del `26 06` parametrizado o del `26 14` es
+todavía una especificación de escritura, y el `26 14` de los modos de audio no
+se ha reproducido nunca desde Linux.
 
 Fixed quedó aceptado como completo tras el QA físico del laboratorio visual.
 La serie D35 a D38 abrió la decodificación de los modos animados con Spectrum
@@ -847,10 +960,21 @@ Wave y la campaña D39 a D46 completó la enumeración de modos y los primeros
 campos: identificador de modo verificado, velocidad uint16 con escala por
 modo, lista de colores R B G con brillo horneado, bit de dirección, la
 familia `26 06` parametrizada de Marquee y Wave y el streaming `26 14` de los
-modos de audio.
+modos de audio. D47 a D51 cerraron las dos curvas de velocidad de Alternating
+y demostraron que la escala es una tabla y no una función.
+
+Entre el 27 y el 29 de julio de 2026 la decodificación pasó a demostración
+física por trama congelada, con Spectrum Wave D35, Alternating D47 y las
+cinco velocidades con desplazamiento de D49 y D50 ya publicadas en `master`
+con QA físico aprobado.
 
 Los pendientes concretos de iluminación, en orden natural:
 
+- Laboratorio cerrado para la tabla `in-place-right` de D51, con las muescas
+  600, 800, 1000, 1300 y 1600, por el mismo método de trama congelada. Es la
+  única tabla de Alternating medida que todavía no tiene laboratorio.
+- Dirección izquierda de Alternating a partir de D48, deliberadamente al
+  final porque su atribución es menos rigurosa que la de D47, D49 y D50.
 - Reintentar Temperature Monitor, quizá tras reiniciar CAM o con otra fuente
   de temperatura, para determinar su patrón de transporte. Hoy tiene triple
   resultado negativo en la VM (D42, D46 y D47) y ninguna trama capturada.

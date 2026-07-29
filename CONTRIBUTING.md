@@ -24,7 +24,10 @@ minutes with a dual-boot machine.
 - **Read-only until the protocol is understood.** Never ship code that writes
   reports to a device based on guesses; a wrong write can hang a controller
   until power-cycle (or worse, brick it).
-- Working tools are plain `bash` or Python ≥3.10 with `hidapi` only.
+- Working tools are plain `bash` or Python ≥3.10 using only the standard
+  library. The N9 code opens `/dev/hidrawN` directly and has no `hidapi`
+  dependency. The one third-party dependency in the repo is PyQt6, used only
+  by the laboratory UI, which is not installed.
 - Keep tools installable three ways: `install.sh`, PKGBUILD, `.deb`.
 - English for code and docs; the two READMEs (EN/ES) stay in sync.
 
