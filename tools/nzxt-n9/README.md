@@ -221,9 +221,32 @@ order, and that fans and pump remained normal.
 This physical QA covers the five exact travelling-right frames, the exact D47
 in-place Normal frame and their D32 restorations on this board.
 
-The four remaining in-place notches from D51 have mechanical and
-capture-level verification only. They have not been written to hardware by
-this laboratory and do not inherit the travelling-table physical QA. The
+**Verified by the operator on 2026-07-29:** the four new D51 in-place notches
+were replayed. Before any write the D51 capture matched its recorded
+checksums, its five `2a 04` frames were re-extracted and matched the frozen
+states with no leftover frame, the exact D32 restoration frame was verified
+from its own private PCAP, the offline checks passed, and real preflight
+passed at 46.0 C without opening hidraw. Linux resolved the N9 as
+`/dev/hidraw3`. The laboratory sent `in-place-right-fastest` once at 49.0 C,
+`in-place-right-fast` once at 46.0 C, `in-place-right-slow` once at 46.0 C and
+`in-place-right-slowest` once at 61.0 C. Each state was observed for 10
+seconds and each was followed by a successful D32 restoration. The final
+preflight passed at 59.0 C with no process retaining a hidraw handle. The
+operator confirmed that the whole board toggled in place with no lateral
+travel, at four clearly distinct rates from fastest to slowest, and that fans
+and pump remained normal.
+
+The cycle was run twice. The first run completed with the same technical
+result but the operator did not watch it, so it was repeated and only the
+second run counts as observed evidence.
+
+**This unit was accepted without the independent review** that gated the D35,
+D47, D49 and D50 units. The operator waived that gate explicitly after being
+told the implementation and the review would otherwise share one author. The
+frame evidence, the offline suite and the physical QA are unaffected, but this
+unit has one less layer of scrutiny than the earlier ones.
+
+Both Alternating speed tables now have physical QA on this board. The
 laboratory does not expose the opposite direction or any D48 state, and no
 unmeasured state may be inferred.
 

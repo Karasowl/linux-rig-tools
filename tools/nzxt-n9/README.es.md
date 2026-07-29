@@ -231,10 +231,35 @@ Este QA físico cubre las cinco tramas exactas de desplazamiento hacia la
 derecha, la trama exacta D47 en posición y Normal y sus restauraciones D32 en
 esta placa.
 
-Las cuatro muescas restantes en posición, procedentes de D51, solo tienen
-verificación mecánica y de captura. No se han escrito al hardware desde este
-laboratorio y no heredan el QA físico de la tabla con desplazamiento. El
-laboratorio no expone la dirección contraria ni ningún estado D48, y no se
+**Verificado por el operador el 29 de julio de 2026:** se reprodujeron las
+cuatro muescas nuevas en posición de D51. Antes de cualquier escritura la
+captura D51 coincidió con sus checksums registrados, sus cinco tramas `2a 04`
+se reextrajeron y coincidieron con los estados congelados sin ninguna trama
+sobrante, la trama exacta de restauración D32 se verificó desde su propia PCAP
+privada, las comprobaciones offline pasaron y el preflight real pasó a 46,0 C
+sin abrir hidraw. Linux resolvió la N9 como `/dev/hidraw3`. El laboratorio
+envió `in-place-right-fastest` una vez a 49,0 C, `in-place-right-fast` una vez
+a 46,0 C, `in-place-right-slow` una vez a 46,0 C e `in-place-right-slowest` una
+vez a 61,0 C. Cada estado se observó durante 10 segundos y cada uno fue seguido
+de una restauración D32 correcta. El preflight final pasó a 59,0 C sin ningún
+proceso reteniendo un handle de hidraw. El operador confirmó que la placa
+entera conmutaba en su sitio, sin recorrido lateral, a cuatro ritmos claramente
+distintos de más rápido a más lento, y que los ventiladores y la bomba
+permanecieron normales.
+
+El ciclo se ejecutó dos veces. La primera terminó con el mismo resultado
+técnico, pero el operador no la observó, así que se repitió y solo la segunda
+cuenta como evidencia observada.
+
+**Esta unidad se aceptó sin la revisión independiente** que sirvió de puerta en
+las unidades D35, D47, D49 y D50. El operador renunció a esa puerta de forma
+explícita después de que se le advirtiera que, si no, la implementación y la
+revisión compartirían un mismo autor. La evidencia de las tramas, la suite
+offline y el QA físico no se ven afectados, pero esta unidad tiene una capa
+menos de escrutinio que las anteriores.
+
+Las dos tablas de velocidad de Alternating ya tienen QA físico en esta placa.
+El laboratorio no expone la dirección contraria ni ningún estado D48, y no se
 debe inferir ningún estado no medido.
 
 ## Observaciones de iluminación de CAM

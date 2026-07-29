@@ -1106,10 +1106,30 @@ derive one from the other. That is a direct consequence of D50 and D51: the
 scale is a lookup table, and the sub-mode factor of 2 breaks at `Slow`, where
 the measured pair is 700 and 1300 rather than 700 and 1400.
 
-The four new in-place operations have mechanical and capture-level
-verification only. They have not yet been written to hardware by this
-laboratory and do not inherit the travelling table's physical QA. The
-laboratory still exposes no D48 direction state.
+**Verified by the operator on 2026-07-29:** the four new in-place notches were
+replayed on this board. The D51 capture matched its recorded checksums, its
+five frames were re-extracted and matched the frozen states with no leftover
+frame, the D32 safety net was verified from its own private PCAP, and real
+preflight passed at 46.0 C without opening hidraw. The laboratory sent
+`in-place-right-fastest` at 49.0 C, `in-place-right-fast` at 46.0 C,
+`in-place-right-slow` at 46.0 C and `in-place-right-slowest` at 61.0 C, each
+once, each observed for 10 seconds and each followed by a successful D32
+restoration. Final preflight passed at 59.0 C with no process retaining a
+hidraw handle. The operator confirmed that the whole board toggled in place
+with no lateral travel, at four clearly distinct rates from fastest to
+slowest, and that fans and pump remained normal. The cycle was run twice
+because the operator did not watch the first run, and only the observed second
+run counts as evidence.
+
+With this, both Alternating speed tables have physical QA on this board. That
+closes the speed scale of the only mode in the matrix that exposes a movement
+switch, in both of its sub-modes.
+
+**Scrutiny caveat.** Unlike D35, D47, D49 and D50, this unit was accepted
+without an independent review by a second author. The operator waived that
+gate explicitly. The capture evidence, the offline suite and the physical QA
+stand on their own, but the implementation was not read by anyone other than
+its author. The laboratory still exposes no D48 direction state.
 
 ### D51: the sub-mode factor is not a rule
 
