@@ -131,14 +131,14 @@ subsequent typed D32 restoration completed successfully and returned the board
 to Fixed. This QA validates only the frozen D35 replay and D32 restore on this
 board. It does not authorize other animated frames or inferred parameters.
 
-## Alternating D47, D49 and D50 write lab (closed, not installed)
+## Alternating D47, D49, D50 and D51 write lab (closed, not installed)
 
-`bin/nzxt-n9-alternating-write-lab` is a separate closed harness for six exact
-512-byte frames extracted directly from the private D47, D49 and D50 captures.
-Five named operations cover the measured travelling-right speed table. The
-sixth preserves the D47 in-place Normal state. It is not an encoder and has no
-inputs for a payload, color, brightness, numeric speed, direction, mode,
-channel, LED count or hidraw path.
+`bin/nzxt-n9-alternating-write-lab` is a separate closed harness for ten exact
+512-byte frames extracted directly from the private D47, D49, D50 and D51
+captures. They are the two complete measured speed tables of Alternating, five
+notches each: the travelling sub-mode and the in-place sub-mode. It is not an
+encoder and has no inputs for a payload, color, brightness, numeric speed,
+direction, mode, channel, LED count or hidraw path.
 
 The only available Alternating states are:
 
@@ -149,7 +149,19 @@ The only available Alternating states are:
 | `travel-right-normal` | D47 1477 and 4667, D49 2431, D50 1471 | 500 | `01` | `bb88f24351f7817582c5f591203c5cae3b4963ad4b6bb1e2fd244b56c9dee782` |
 | `travel-right-slow` | D50 1497 | 700 | `01` | `ccc5de88b19f5a4ce518ff28beb49783af40073453a6546543d0b84fcb1c6ab2` |
 | `travel-right-slowest` | D49 2187 and D50 1519 | 800 | `01` | `bca2c0146e7ea24ea02f9f3ef1be93117d9559871ca275637ecf845a69db03fe` |
-| `in-place-right-normal` | D47 3725 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
+| `in-place-right-fastest` | D51 6901 | 600 | `00` | `1a96361d6ce5096e3ea84f3cf99054bdc6afd02b859aaaa23455c54dcb8c8e91` |
+| `in-place-right-fast` | D51 6885 | 800 | `00` | `5b7d7042382bf69c7920465355af73118bca1c394b0d561f4509318d519d1587` |
+| `in-place-right-normal` | D47 3725, D51 6865 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
+| `in-place-right-slow` | D51 6853 | 1300 | `00` | `af48e4a14b0357c3fec8d66c8016612d769d4112cb59b11156255f5faa833402` |
+| `in-place-right-slowest` | D51 6015 | 1600 | `00` | `77a1bb88ad9ae133a0eb6c35ead49d919481fad8c0781e80c7ca95f222a17fcb` |
+
+The two tables are stored as **independent transcriptions**. D50 proved the
+scale is a lookup table rather than an interpolable function, and D51 proved
+one sub-mode does not derive from the other: the factor of 2 holds at four
+notches and breaks at `Slow`, where the measured pair is 700 and 1300 instead
+of 700 and 1400. Deriving either table would write a value CAM never sent.
+D47 frame 3725 and D51 frame 6865 are the same payload four days apart, which
+is the cross-capture control for the in-place table.
 
 All frames carry mode `05`, the exact captured color bytes
 `28 40 8b 00 61 00`, color count `02`, byte 57 `00`, and bytes 58 and 59
@@ -164,7 +176,11 @@ nzxt-n9-alternating-write-lab --offline apply-travel-right-fast I-CONFIRM-1E71:2
 nzxt-n9-alternating-write-lab --offline apply-travel-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-TRAVEL-RIGHT-NORMAL
 nzxt-n9-alternating-write-lab --offline apply-travel-right-slow I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D50-TRAVEL-RIGHT-SLOW
 nzxt-n9-alternating-write-lab --offline apply-travel-right-slowest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D49-TRAVEL-RIGHT-SLOWEST
+nzxt-n9-alternating-write-lab --offline apply-in-place-right-fastest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-FASTEST
+nzxt-n9-alternating-write-lab --offline apply-in-place-right-fast I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-FAST
 nzxt-n9-alternating-write-lab --offline apply-in-place-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-IN-PLACE-RIGHT-NORMAL
+nzxt-n9-alternating-write-lab --offline apply-in-place-right-slow I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-SLOW
+nzxt-n9-alternating-write-lab --offline apply-in-place-right-slowest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-SLOWEST
 nzxt-n9-alternating-write-lab --offline restore-d32 I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED
 ```
 
@@ -203,9 +219,13 @@ clearly distinct speeds of the same travelling-right effect, in the expected
 order, and that fans and pump remained normal.
 
 This physical QA covers the five exact travelling-right frames, the exact D47
-in-place frame and their D32 restorations on this board. The laboratory does
-not expose the opposite direction, in-place speed notches beyond Normal, D48 or
-D51 states. No unmeasured state may be inferred.
+in-place Normal frame and their D32 restorations on this board.
+
+The four remaining in-place notches from D51 have mechanical and
+capture-level verification only. They have not been written to hardware by
+this laboratory and do not inherit the travelling-table physical QA. The
+laboratory does not expose the opposite direction or any D48 state, and no
+unmeasured state may be inferred.
 
 ## CAM lighting observations
 

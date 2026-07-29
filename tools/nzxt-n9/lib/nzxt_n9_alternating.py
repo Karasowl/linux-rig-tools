@@ -1,8 +1,10 @@
-"""Closed Alternating D47, D49 and D50 laboratory operations for the NZXT N9.
+"""Closed Alternating D47, D49, D50 and D51 laboratory operations for the N9.
 
-Only exact 512-byte frames measured in D47, D49 and D50 exist here. This
+Only exact 512-byte frames measured in D47, D49, D50 and D51 exist here. This
 module is not an encoder, does not expose arbitrary payloads and does not
-generalize the D48 or D51 observations.
+generalize the D48 observations. The two sub-mode speed tables are stored as
+independent transcriptions because D50 proved the scale is a lookup table and
+D51 proved one table does not derive from the other.
 """
 from __future__ import annotations
 
@@ -55,8 +57,21 @@ D50_PCAP_PATH: Final = Path(
 D50_PCAP_SHA256: Final = (
     "860c77728a76281056524f0ef469c965e631523fa2faef8bdf50983280a579db"
 )
+D51_PCAP_PATH: Final = Path(
+    "/home/karasowl/vms/win11-cap/captures/nzxt-n9/"
+    "2026-07-26-d51-alternating-no-propagation-full-scale/"
+    "alternating-no-propagation-full-scale-private-bus.pcapng"
+)
+D51_PCAP_SHA256: Final = (
+    "511bbc339a392a17c617315d9bb9c0191a061abf6e86e6bce8122249dd087ebe"
+)
 TRAVEL_RIGHT_NORMAL_FRAME_NUMBER: Final = 1477
 IN_PLACE_RIGHT_NORMAL_FRAME_NUMBER: Final = 3725
+IN_PLACE_RIGHT_SLOWEST_D51_FRAME_NUMBER: Final = 6015
+IN_PLACE_RIGHT_SLOW_D51_FRAME_NUMBER: Final = 6853
+IN_PLACE_RIGHT_NORMAL_D51_FRAME_NUMBER: Final = 6865
+IN_PLACE_RIGHT_FAST_D51_FRAME_NUMBER: Final = 6885
+IN_PLACE_RIGHT_FASTEST_D51_FRAME_NUMBER: Final = 6901
 TRAVEL_RIGHT_FASTEST_D49_FRAME_NUMBERS: Final = (1789, 2579)
 TRAVEL_RIGHT_SLOWEST_D49_FRAME_NUMBER: Final = 2187
 TRAVEL_RIGHT_NORMAL_D49_FRAME_NUMBER: Final = 2431
@@ -79,8 +94,20 @@ TRAVEL_RIGHT_SLOW_SHA256: Final = (
 TRAVEL_RIGHT_SLOWEST_SHA256: Final = (
     "bca2c0146e7ea24ea02f9f3ef1be93117d9559871ca275637ecf845a69db03fe"
 )
+IN_PLACE_RIGHT_FASTEST_SHA256: Final = (
+    "1a96361d6ce5096e3ea84f3cf99054bdc6afd02b859aaaa23455c54dcb8c8e91"
+)
+IN_PLACE_RIGHT_FAST_SHA256: Final = (
+    "5b7d7042382bf69c7920465355af73118bca1c394b0d561f4509318d519d1587"
+)
 IN_PLACE_RIGHT_NORMAL_SHA256: Final = (
     "a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6"
+)
+IN_PLACE_RIGHT_SLOW_SHA256: Final = (
+    "af48e4a14b0357c3fec8d66c8016612d769d4112cb59b11156255f5faa833402"
+)
+IN_PLACE_RIGHT_SLOWEST_SHA256: Final = (
+    "77a1bb88ad9ae133a0eb6c35ead49d919481fad8c0781e80c7ca95f222a17fcb"
 )
 TRAVEL_RIGHT_FASTEST_CONFIRM_TOKEN: Final = (
     "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D49-"
@@ -102,9 +129,25 @@ TRAVEL_RIGHT_SLOWEST_CONFIRM_TOKEN: Final = (
     "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D49-"
     "TRAVEL-RIGHT-SLOWEST"
 )
+IN_PLACE_RIGHT_FASTEST_CONFIRM_TOKEN: Final = (
+    "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-"
+    "IN-PLACE-RIGHT-FASTEST"
+)
+IN_PLACE_RIGHT_FAST_CONFIRM_TOKEN: Final = (
+    "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-"
+    "IN-PLACE-RIGHT-FAST"
+)
 IN_PLACE_RIGHT_NORMAL_CONFIRM_TOKEN: Final = (
     "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-"
     "IN-PLACE-RIGHT-NORMAL"
+)
+IN_PLACE_RIGHT_SLOW_CONFIRM_TOKEN: Final = (
+    "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-"
+    "IN-PLACE-RIGHT-SLOW"
+)
+IN_PLACE_RIGHT_SLOWEST_CONFIRM_TOKEN: Final = (
+    "I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-"
+    "IN-PLACE-RIGHT-SLOWEST"
 )
 RESTORE_CONFIRM_TOKEN: Final = (
     "I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED"
@@ -156,6 +199,26 @@ _TRAVEL_RIGHT_SLOWEST_FRAME: Final = bytes.fromhex(
     "000000000000000102003104"
     + "00" * 452
 )
+_IN_PLACE_RIGHT_FASTEST_FRAME: Final = bytes.fromhex(
+    "2a0420200558020028408b00610000000000000000000000000000000000000000000000000000000000000000000000"
+    "000000000000000002003104"
+    + "00" * 452
+)
+_IN_PLACE_RIGHT_FAST_FRAME: Final = bytes.fromhex(
+    "2a0420200520030028408b00610000000000000000000000000000000000000000000000000000000000000000000000"
+    "000000000000000002003104"
+    + "00" * 452
+)
+_IN_PLACE_RIGHT_SLOW_FRAME: Final = bytes.fromhex(
+    "2a0420200514050028408b00610000000000000000000000000000000000000000000000000000000000000000000000"
+    "000000000000000002003104"
+    + "00" * 452
+)
+_IN_PLACE_RIGHT_SLOWEST_FRAME: Final = bytes.fromhex(
+    "2a0420200540060028408b00610000000000000000000000000000000000000000000000000000000000000000000000"
+    "000000000000000002003104"
+    + "00" * 452
+)
 
 
 def _validate_exact_frame(
@@ -177,7 +240,7 @@ def _validate_exact_frame(
 
 @dataclass(frozen=True)
 class AlternatingD47:
-    """Parameter-free access to exact D47, D49 and D50 frames."""
+    """Parameter-free access to exact D47, D49, D50 and D51 frames."""
 
     def travel_right_fastest_frame(self) -> bytes:
         frame = bytes(_TRAVEL_RIGHT_FASTEST_FRAME)
@@ -239,13 +302,57 @@ class AlternatingD47:
         )
         return frame
 
+    def in_place_right_fastest_frame(self) -> bytes:
+        frame = bytes(_IN_PLACE_RIGHT_FASTEST_FRAME)
+        _validate_exact_frame(
+            frame,
+            _IN_PLACE_RIGHT_FASTEST_FRAME,
+            IN_PLACE_RIGHT_FASTEST_SHA256,
+            "D51 in-place-right-fastest",
+        )
+        return frame
+
+    def in_place_right_fast_frame(self) -> bytes:
+        frame = bytes(_IN_PLACE_RIGHT_FAST_FRAME)
+        _validate_exact_frame(
+            frame,
+            _IN_PLACE_RIGHT_FAST_FRAME,
+            IN_PLACE_RIGHT_FAST_SHA256,
+            "D51 in-place-right-fast",
+        )
+        return frame
+
+    def in_place_right_slow_frame(self) -> bytes:
+        frame = bytes(_IN_PLACE_RIGHT_SLOW_FRAME)
+        _validate_exact_frame(
+            frame,
+            _IN_PLACE_RIGHT_SLOW_FRAME,
+            IN_PLACE_RIGHT_SLOW_SHA256,
+            "D51 in-place-right-slow",
+        )
+        return frame
+
+    def in_place_right_slowest_frame(self) -> bytes:
+        frame = bytes(_IN_PLACE_RIGHT_SLOWEST_FRAME)
+        _validate_exact_frame(
+            frame,
+            _IN_PLACE_RIGHT_SLOWEST_FRAME,
+            IN_PLACE_RIGHT_SLOWEST_SHA256,
+            "D51 in-place-right-slowest",
+        )
+        return frame
+
     def validate_all(self) -> None:
         self.travel_right_fastest_frame()
         self.travel_right_fast_frame()
         self.travel_right_normal_frame()
         self.travel_right_slow_frame()
         self.travel_right_slowest_frame()
+        self.in_place_right_fastest_frame()
+        self.in_place_right_fast_frame()
         self.in_place_right_normal_frame()
+        self.in_place_right_slow_frame()
+        self.in_place_right_slowest_frame()
 
 
 class AlternatingD47Writer:
@@ -298,6 +405,30 @@ class AlternatingD47Writer:
         return self._apply(
             AlternatingD47().travel_right_slowest_frame(),
             "D49 travel-right-slowest",
+        )
+
+    def apply_in_place_right_fastest(self) -> SendResult:
+        return self._apply(
+            AlternatingD47().in_place_right_fastest_frame(),
+            "D51 in-place-right-fastest",
+        )
+
+    def apply_in_place_right_fast(self) -> SendResult:
+        return self._apply(
+            AlternatingD47().in_place_right_fast_frame(),
+            "D51 in-place-right-fast",
+        )
+
+    def apply_in_place_right_slow(self) -> SendResult:
+        return self._apply(
+            AlternatingD47().in_place_right_slow_frame(),
+            "D51 in-place-right-slow",
+        )
+
+    def apply_in_place_right_slowest(self) -> SendResult:
+        return self._apply(
+            AlternatingD47().in_place_right_slowest_frame(),
+            "D51 in-place-right-slowest",
         )
 
     def _apply(self, frame: bytes, label: str) -> SendResult:
@@ -359,6 +490,38 @@ class AlternatingD47Writer:
                 frame,
                 _IN_PLACE_RIGHT_NORMAL_FRAME,
                 IN_PLACE_RIGHT_NORMAL_SHA256,
+                label,
+            )
+            return
+        if label == "D51 in-place-right-fastest":
+            _validate_exact_frame(
+                frame,
+                _IN_PLACE_RIGHT_FASTEST_FRAME,
+                IN_PLACE_RIGHT_FASTEST_SHA256,
+                label,
+            )
+            return
+        if label == "D51 in-place-right-fast":
+            _validate_exact_frame(
+                frame,
+                _IN_PLACE_RIGHT_FAST_FRAME,
+                IN_PLACE_RIGHT_FAST_SHA256,
+                label,
+            )
+            return
+        if label == "D51 in-place-right-slow":
+            _validate_exact_frame(
+                frame,
+                _IN_PLACE_RIGHT_SLOW_FRAME,
+                IN_PLACE_RIGHT_SLOW_SHA256,
+                label,
+            )
+            return
+        if label == "D51 in-place-right-slowest":
+            _validate_exact_frame(
+                frame,
+                _IN_PLACE_RIGHT_SLOWEST_FRAME,
+                IN_PLACE_RIGHT_SLOWEST_SHA256,
                 label,
             )
             return
@@ -452,4 +615,32 @@ class OfflineAlternatingD47Writer:
         return SendResult(
             False,
             "offline D49 travel-right-slowest validation, zero hidraw opens or writes",
+        )
+
+    def apply_in_place_right_fastest(self) -> SendResult:
+        AlternatingD47().in_place_right_fastest_frame()
+        return SendResult(
+            False,
+            "offline D51 in-place-right-fastest validation, zero hidraw opens or writes",
+        )
+
+    def apply_in_place_right_fast(self) -> SendResult:
+        AlternatingD47().in_place_right_fast_frame()
+        return SendResult(
+            False,
+            "offline D51 in-place-right-fast validation, zero hidraw opens or writes",
+        )
+
+    def apply_in_place_right_slow(self) -> SendResult:
+        AlternatingD47().in_place_right_slow_frame()
+        return SendResult(
+            False,
+            "offline D51 in-place-right-slow validation, zero hidraw opens or writes",
+        )
+
+    def apply_in_place_right_slowest(self) -> SendResult:
+        AlternatingD47().in_place_right_slowest_frame()
+        return SendResult(
+            False,
+            "offline D51 in-place-right-slowest validation, zero hidraw opens or writes",
         )

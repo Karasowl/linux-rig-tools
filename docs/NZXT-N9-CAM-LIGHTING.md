@@ -934,8 +934,10 @@ seconds, and restored D32 successfully. It then passed another preflight at
 again. Final preflight passed at 63.0 C with no process retaining a hidraw
 handle. The operator confirmed that both effects looked correct and that fans
 and pump remained normal. This physical QA validates only those two exact D47
-replays and their D32 restorations on this board. The laboratory still does
-not expose or authorize any D48 through D51 direction or speed state.
+replays and their D32 restorations on this board. At that date the laboratory
+exposed no other state. It was widened later, first with the D49 and D50
+travelling speeds and then with the D51 in-place speeds, each under its own
+evidence and its own authorization. It still exposes no D48 direction state.
 
 ### D48: direction and speed without propagation
 
@@ -1078,8 +1080,36 @@ states appeared as clearly distinct speeds of the same travelling-right
 effect, in the expected order, and that fans and pump remained normal.
 
 All five travelling-right speed states now have physical QA on this board.
-The laboratory still exposes no D48 state, no in-place speed notch beyond
-Normal and no D51 state.
+
+The closed laboratory was then widened to the second measured table, the
+in-place sub-mode of D51. It freezes the full 512-byte payload of each notch,
+exactly as the travelling table does:
+
+| Operation | Canonical source frame | Speed | Binary SHA-256 |
+| --- | --- | ---: | --- |
+| `in-place-right-fastest` | D51 6901 | 600 | `1a96361d6ce5096e3ea84f3cf99054bdc6afd02b859aaaa23455c54dcb8c8e91` |
+| `in-place-right-fast` | D51 6885 | 800 | `5b7d7042382bf69c7920465355af73118bca1c394b0d561f4509318d519d1587` |
+| `in-place-right-normal` | D47 3725 and D51 6865 | 1000 | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
+| `in-place-right-slow` | D51 6853 | 1300 | `af48e4a14b0357c3fec8d66c8016612d769d4112cb59b11156255f5faa833402` |
+| `in-place-right-slowest` | D51 6015 | 1600 | `77a1bb88ad9ae133a0eb6c35ead49d919481fad8c0781e80c7ca95f222a17fcb` |
+
+D51 PCAP SHA-256 is
+`511bbc339a392a17c617315d9bb9c0191a061abf6e86e6bce8122249dd087ebe`.
+The five frames are the whole `2a 04` content of that window, with no leftover
+frame, and across them only bytes 5 and 6 differ. Byte 55 is `00` in all five.
+D47 frame 3725 and D51 frame 6865 are the same payload four days apart, which
+is the cross-capture control for this table, the counterpart of the Normal and
+Slowest controls that anchor the travelling one.
+
+The two tables are stored as independent transcriptions and the code cannot
+derive one from the other. That is a direct consequence of D50 and D51: the
+scale is a lookup table, and the sub-mode factor of 2 breaks at `Slow`, where
+the measured pair is 700 and 1300 rather than 700 and 1400.
+
+The four new in-place operations have mechanical and capture-level
+verification only. They have not yet been written to hardware by this
+laboratory and do not inherit the travelling table's physical QA. The
+laboratory still exposes no D48 direction state.
 
 ### D51: the sub-mode factor is not a rule
 

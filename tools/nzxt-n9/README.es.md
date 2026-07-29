@@ -136,13 +136,13 @@ la placa a Fixed. Este QA valida únicamente la repetición D35 congelada y la
 restauración D32 en esta placa. No autoriza otras tramas animadas ni parámetros
 inferidos.
 
-## Laboratorio de escritura Alternating D47, D49 y D50 (cerrado, no instalado)
+## Laboratorio de escritura Alternating D47, D49, D50 y D51 (cerrado, no instalado)
 
-`bin/nzxt-n9-alternating-write-lab` es un arnés cerrado separado para seis
+`bin/nzxt-n9-alternating-write-lab` es un arnés cerrado separado para diez
 tramas exactas de 512 bytes extraídas directamente de las capturas privadas
-D47, D49 y D50. Cinco operaciones nominales cubren la tabla medida con
-desplazamiento hacia la derecha. La sexta conserva el estado D47 en posición
-y Normal. No es un encoder y no acepta como entrada payload, color, brillo,
+D47, D49, D50 y D51. Son las dos tablas de velocidad completas de Alternating,
+cinco muescas cada una: el submodo con desplazamiento y el submodo en
+posición. No es un encoder y no acepta como entrada payload, color, brillo,
 velocidad numérica, dirección, modo, canal, número de LED ni ruta hidraw.
 
 Los únicos estados Alternating disponibles son:
@@ -154,7 +154,19 @@ Los únicos estados Alternating disponibles son:
 | `travel-right-normal` | D47 1477 y 4667, D49 2431, D50 1471 | 500 | `01` | `bb88f24351f7817582c5f591203c5cae3b4963ad4b6bb1e2fd244b56c9dee782` |
 | `travel-right-slow` | D50 1497 | 700 | `01` | `ccc5de88b19f5a4ce518ff28beb49783af40073453a6546543d0b84fcb1c6ab2` |
 | `travel-right-slowest` | D49 2187 y D50 1519 | 800 | `01` | `bca2c0146e7ea24ea02f9f3ef1be93117d9559871ca275637ecf845a69db03fe` |
-| `in-place-right-normal` | D47 3725 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
+| `in-place-right-fastest` | D51 6901 | 600 | `00` | `1a96361d6ce5096e3ea84f3cf99054bdc6afd02b859aaaa23455c54dcb8c8e91` |
+| `in-place-right-fast` | D51 6885 | 800 | `00` | `5b7d7042382bf69c7920465355af73118bca1c394b0d561f4509318d519d1587` |
+| `in-place-right-normal` | D47 3725, D51 6865 | 1000 | `00` | `a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6` |
+| `in-place-right-slow` | D51 6853 | 1300 | `00` | `af48e4a14b0357c3fec8d66c8016612d769d4112cb59b11156255f5faa833402` |
+| `in-place-right-slowest` | D51 6015 | 1600 | `00` | `77a1bb88ad9ae133a0eb6c35ead49d919481fad8c0781e80c7ca95f222a17fcb` |
+
+Las dos tablas se guardan como **transcripciones independientes**. D50 demostró
+que la escala es una tabla y no una función interpolable, y D51 demostró que un
+submodo no se deriva del otro: el factor 2 se cumple en cuatro muescas y se
+rompe en `Slow`, donde el par medido es 700 y 1300 en lugar de 700 y 1400.
+Derivar cualquiera de las dos tablas escribiría un valor que CAM nunca envió.
+La trama D47 3725 y la D51 6865 son el mismo payload con cuatro días de
+diferencia, y son el control cruzado de la tabla en posición.
 
 Todas las tramas llevan el modo `05`, los bytes de color capturados exactos
 `28 40 8b 00 61 00`, recuento de colores `02`, byte 57 `00` y bytes 58 y 59
@@ -169,7 +181,11 @@ nzxt-n9-alternating-write-lab --offline apply-travel-right-fast I-CONFIRM-1E71:2
 nzxt-n9-alternating-write-lab --offline apply-travel-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-TRAVEL-RIGHT-NORMAL
 nzxt-n9-alternating-write-lab --offline apply-travel-right-slow I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D50-TRAVEL-RIGHT-SLOW
 nzxt-n9-alternating-write-lab --offline apply-travel-right-slowest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D49-TRAVEL-RIGHT-SLOWEST
+nzxt-n9-alternating-write-lab --offline apply-in-place-right-fastest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-FASTEST
+nzxt-n9-alternating-write-lab --offline apply-in-place-right-fast I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-FAST
 nzxt-n9-alternating-write-lab --offline apply-in-place-right-normal I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D47-IN-PLACE-RIGHT-NORMAL
+nzxt-n9-alternating-write-lab --offline apply-in-place-right-slow I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-SLOW
+nzxt-n9-alternating-write-lab --offline apply-in-place-right-slowest I-CONFIRM-1E71:2023-LIGHTING-ONLY-APPLY-ALTERNATING-D51-IN-PLACE-RIGHT-SLOWEST
 nzxt-n9-alternating-write-lab --offline restore-d32 I-CONFIRM-1E71:2023-LIGHTING-ONLY-RESTORE-D32-FIXED
 ```
 
@@ -212,10 +228,14 @@ hacia la derecha, en el orden esperado, y que los ventiladores y la bomba
 permanecieron normales.
 
 Este QA físico cubre las cinco tramas exactas de desplazamiento hacia la
-derecha, la trama exacta D47 en posición y sus restauraciones D32 en esta
-placa. El laboratorio no expone la dirección contraria, velocidades en
-posición distintas de Normal ni estados D48 o D51. No se debe inferir ningún
-estado no medido.
+derecha, la trama exacta D47 en posición y Normal y sus restauraciones D32 en
+esta placa.
+
+Las cuatro muescas restantes en posición, procedentes de D51, solo tienen
+verificación mecánica y de captura. No se han escrito al hardware desde este
+laboratorio y no heredan el QA físico de la tabla con desplazamiento. El
+laboratorio no expone la dirección contraria ni ningún estado D48, y no se
+debe inferir ningún estado no medido.
 
 ## Observaciones de iluminación de CAM
 

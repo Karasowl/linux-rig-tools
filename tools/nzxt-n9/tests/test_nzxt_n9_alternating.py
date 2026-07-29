@@ -23,6 +23,62 @@ import nzxt_n9_alternating as alternating
 import nzxt_n9_animated as animated
 import nzxt_n9_fixed as fixed
 
+# Every closed Apply the CLI exposes, as (command, exact token, frame label).
+# The label is the frozen operation the library reports, so this table pins
+# the command-to-frame wiring end to end.
+APPLY_CLI_OPERATIONS = (
+    (
+        "apply-travel-right-fastest",
+        alternating.TRAVEL_RIGHT_FASTEST_CONFIRM_TOKEN,
+        "D49 travel-right-fastest",
+    ),
+    (
+        "apply-travel-right-fast",
+        alternating.TRAVEL_RIGHT_FAST_CONFIRM_TOKEN,
+        "D50 travel-right-fast",
+    ),
+    (
+        "apply-travel-right-normal",
+        alternating.TRAVEL_RIGHT_NORMAL_CONFIRM_TOKEN,
+        "D47 travel-right-normal",
+    ),
+    (
+        "apply-travel-right-slow",
+        alternating.TRAVEL_RIGHT_SLOW_CONFIRM_TOKEN,
+        "D50 travel-right-slow",
+    ),
+    (
+        "apply-travel-right-slowest",
+        alternating.TRAVEL_RIGHT_SLOWEST_CONFIRM_TOKEN,
+        "D49 travel-right-slowest",
+    ),
+    (
+        "apply-in-place-right-fastest",
+        alternating.IN_PLACE_RIGHT_FASTEST_CONFIRM_TOKEN,
+        "D51 in-place-right-fastest",
+    ),
+    (
+        "apply-in-place-right-fast",
+        alternating.IN_PLACE_RIGHT_FAST_CONFIRM_TOKEN,
+        "D51 in-place-right-fast",
+    ),
+    (
+        "apply-in-place-right-normal",
+        alternating.IN_PLACE_RIGHT_NORMAL_CONFIRM_TOKEN,
+        "D47 in-place-right-normal",
+    ),
+    (
+        "apply-in-place-right-slow",
+        alternating.IN_PLACE_RIGHT_SLOW_CONFIRM_TOKEN,
+        "D51 in-place-right-slow",
+    ),
+    (
+        "apply-in-place-right-slowest",
+        alternating.IN_PLACE_RIGHT_SLOWEST_CONFIRM_TOKEN,
+        "D51 in-place-right-slowest",
+    ),
+)
+
 
 def _descriptor(*, include_2a: bool = True) -> bytes:
     descriptor = bytearray(150)
@@ -71,10 +127,17 @@ class FrameTests(unittest.TestCase):
             "slow": states.travel_right_slow_frame(),
             "slowest": states.travel_right_slowest_frame(),
         }
+        in_place_by_name = {
+            "fastest": states.in_place_right_fastest_frame(),
+            "fast": states.in_place_right_fast_frame(),
+            "normal": states.in_place_right_normal_frame(),
+            "slow": states.in_place_right_slow_frame(),
+            "slowest": states.in_place_right_slowest_frame(),
+        }
         travel = states.travel_right_normal_frame()
         in_place = states.in_place_right_normal_frame()
 
-        for frame in (*travel_by_name.values(), in_place):
+        for frame in (*travel_by_name.values(), *in_place_by_name.values()):
             self.assertEqual(len(frame), 512)
             self.assertEqual(frame[:5], bytes.fromhex("2a04202005"))
             self.assertEqual(frame[8:14], bytes.fromhex("28408b006100"))
@@ -92,17 +155,25 @@ class FrameTests(unittest.TestCase):
         }
         for name, frame in travel_by_name.items():
             speed, digest = expected[name]
-            with self.subTest(name=name):
+            with self.subTest(table="travel", name=name):
                 self.assertEqual(int.from_bytes(frame[5:7], "little"), speed)
                 self.assertEqual(frame[55], 1)
                 self.assertEqual(hashlib.sha256(frame).hexdigest(), digest)
 
-        self.assertEqual(in_place[5:7], bytes.fromhex("e803"))
-        self.assertEqual(in_place[55], 0)
-        self.assertEqual(
-            hashlib.sha256(in_place).hexdigest(),
-            alternating.IN_PLACE_RIGHT_NORMAL_SHA256,
-        )
+        expected_in_place = {
+            "fastest": (600, alternating.IN_PLACE_RIGHT_FASTEST_SHA256),
+            "fast": (800, alternating.IN_PLACE_RIGHT_FAST_SHA256),
+            "normal": (1000, alternating.IN_PLACE_RIGHT_NORMAL_SHA256),
+            "slow": (1300, alternating.IN_PLACE_RIGHT_SLOW_SHA256),
+            "slowest": (1600, alternating.IN_PLACE_RIGHT_SLOWEST_SHA256),
+        }
+        for name, frame in in_place_by_name.items():
+            speed, digest = expected_in_place[name]
+            with self.subTest(table="in-place", name=name):
+                self.assertEqual(int.from_bytes(frame[5:7], "little"), speed)
+                self.assertEqual(frame[55], 0)
+                self.assertEqual(hashlib.sha256(frame).hexdigest(), digest)
+
         for name, frame in travel_by_name.items():
             self.assertEqual(
                 [
@@ -112,6 +183,21 @@ class FrameTests(unittest.TestCase):
                 ],
                 {
                     "fastest": [5],
+                    "fast": [5],
+                    "normal": [],
+                    "slow": [5, 6],
+                    "slowest": [5, 6],
+                }[name],
+            )
+        for name, frame in in_place_by_name.items():
+            self.assertEqual(
+                [
+                    index
+                    for index, pair in enumerate(zip(in_place, frame, strict=True))
+                    if pair[0] != pair[1]
+                ],
+                {
+                    "fastest": [5, 6],
                     "fast": [5],
                     "normal": [],
                     "slow": [5, 6],
@@ -165,6 +251,30 @@ class FrameTests(unittest.TestCase):
                 alternating._TRAVEL_RIGHT_SLOWEST_FRAME,
                 alternating.TRAVEL_RIGHT_SLOWEST_SHA256,
                 "D49 travel-right-slowest",
+            ),
+            (
+                state.in_place_right_fastest_frame(),
+                alternating._IN_PLACE_RIGHT_FASTEST_FRAME,
+                alternating.IN_PLACE_RIGHT_FASTEST_SHA256,
+                "D51 in-place-right-fastest",
+            ),
+            (
+                state.in_place_right_fast_frame(),
+                alternating._IN_PLACE_RIGHT_FAST_FRAME,
+                alternating.IN_PLACE_RIGHT_FAST_SHA256,
+                "D51 in-place-right-fast",
+            ),
+            (
+                state.in_place_right_slow_frame(),
+                alternating._IN_PLACE_RIGHT_SLOW_FRAME,
+                alternating.IN_PLACE_RIGHT_SLOW_SHA256,
+                "D51 in-place-right-slow",
+            ),
+            (
+                state.in_place_right_slowest_frame(),
+                alternating._IN_PLACE_RIGHT_SLOWEST_FRAME,
+                alternating.IN_PLACE_RIGHT_SLOWEST_SHA256,
+                "D51 in-place-right-slowest",
             ),
         )
         for original, expected, digest, label in cases:
@@ -326,6 +436,68 @@ class FrameTests(unittest.TestCase):
                         actual_frames.append((int(number), frame))
                 self.assertEqual(actual_frames, expected_frames)
 
+    def test_private_d51_capture_matches_every_relevant_frame(self) -> None:
+        tshark = shutil.which("tshark")
+        if not alternating.D51_PCAP_PATH.is_file() or tshark is None:
+            self.skipTest("private D51 PCAP or tshark is unavailable")
+
+        self.assertEqual(
+            hashlib.sha256(alternating.D51_PCAP_PATH.read_bytes()).hexdigest(),
+            alternating.D51_PCAP_SHA256,
+        )
+        state = alternating.AlternatingD47()
+        expected_frames = [
+            (
+                alternating.IN_PLACE_RIGHT_SLOWEST_D51_FRAME_NUMBER,
+                state.in_place_right_slowest_frame(),
+            ),
+            (
+                alternating.IN_PLACE_RIGHT_SLOW_D51_FRAME_NUMBER,
+                state.in_place_right_slow_frame(),
+            ),
+            (
+                alternating.IN_PLACE_RIGHT_NORMAL_D51_FRAME_NUMBER,
+                state.in_place_right_normal_frame(),
+            ),
+            (
+                alternating.IN_PLACE_RIGHT_FAST_D51_FRAME_NUMBER,
+                state.in_place_right_fast_frame(),
+            ),
+            (
+                alternating.IN_PLACE_RIGHT_FASTEST_D51_FRAME_NUMBER,
+                state.in_place_right_fastest_frame(),
+            ),
+        ]
+        result = subprocess.run(
+            [
+                tshark,
+                "-r",
+                str(alternating.D51_PCAP_PATH),
+                "-Y",
+                (
+                    "usb.bus_id == 3 && usb.device_address == 6 && "
+                    "usb.transfer_type == 0x01 && "
+                    "usb.endpoint_address.direction == 0 && usb.capdata"
+                ),
+                "-T",
+                "fields",
+                "-e",
+                "frame.number",
+                "-e",
+                "usb.capdata",
+            ],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        actual_frames = []
+        for line in result.stdout.splitlines():
+            number, hex_payload = line.split("\t", 1)
+            frame = bytes.fromhex(hex_payload)
+            if frame.startswith(bytes.fromhex("2a04")):
+                actual_frames.append((int(number), frame))
+        self.assertEqual(actual_frames, expected_frames)
+
     def test_repeated_controls_are_identical_across_d47_d49_and_d50(self) -> None:
         state = alternating.AlternatingD47()
         normal = state.travel_right_normal_frame()
@@ -339,6 +511,84 @@ class FrameTests(unittest.TestCase):
             "bca2c0146e7ea24ea02f9f3ef1be93117d9559871ca275637ecf845a69db03fe",
         )
 
+    def test_in_place_normal_is_the_same_payload_in_d47_and_d51(self) -> None:
+        """D47 frame 3725 and D51 frame 6865 are one cross-capture control."""
+        state = alternating.AlternatingD47()
+        self.assertEqual(
+            hashlib.sha256(state.in_place_right_normal_frame()).hexdigest(),
+            "a11850148cec0e00116a7ef2c851d8bf40514bd3ae532e0065c2cc51504023e6",
+        )
+
+    def test_the_two_speed_tables_are_independent_transcriptions(self) -> None:
+        """D51 refuted the sub-mode factor of 2, so neither table derives.
+
+        The factor holds at four notches and breaks at Slow, where the
+        measured pair is 700 and 1300 rather than 700 and 1400. Deriving one
+        table from the other would silently write a value CAM never sent.
+        """
+        state = alternating.AlternatingD47()
+        travelling = {
+            "fastest": state.travel_right_fastest_frame(),
+            "fast": state.travel_right_fast_frame(),
+            "normal": state.travel_right_normal_frame(),
+            "slow": state.travel_right_slow_frame(),
+            "slowest": state.travel_right_slowest_frame(),
+        }
+        in_place = {
+            "fastest": state.in_place_right_fastest_frame(),
+            "fast": state.in_place_right_fast_frame(),
+            "normal": state.in_place_right_normal_frame(),
+            "slow": state.in_place_right_slow_frame(),
+            "slowest": state.in_place_right_slowest_frame(),
+        }
+        speed = lambda frame: int.from_bytes(frame[5:7], "little")  # noqa: E731
+        measured = {
+            name: (speed(travelling[name]), speed(in_place[name]))
+            for name in travelling
+        }
+        self.assertEqual(
+            measured,
+            {
+                "fastest": (300, 600),
+                "fast": (400, 800),
+                "normal": (500, 1000),
+                "slow": (700, 1300),
+                "slowest": (800, 1600),
+            },
+        )
+        doubled = {
+            name: pair for name, pair in measured.items() if pair[1] == pair[0] * 2
+        }
+        self.assertEqual(set(doubled), {"fastest", "fast", "normal", "slowest"})
+        self.assertNotEqual(measured["slow"][1], measured["slow"][0] * 2)
+
+    def test_speed_800_exists_in_both_tables_as_two_distinct_frames(self) -> None:
+        """The raw speed alone never identifies an operation.
+
+        Travelling Slowest and in-place Fast both carry 800 in bytes 5 and 6
+        and differ only in byte 55. Selecting by speed would send the wrong
+        sub-mode, so the frames stay separate and separately hashed.
+        """
+        state = alternating.AlternatingD47()
+        travelling = state.travel_right_slowest_frame()
+        in_place = state.in_place_right_fast_frame()
+        self.assertEqual(travelling[5:7], in_place[5:7])
+        self.assertEqual(int.from_bytes(travelling[5:7], "little"), 800)
+        self.assertEqual(travelling[55], 1)
+        self.assertEqual(in_place[55], 0)
+        self.assertEqual(
+            [
+                index
+                for index, pair in enumerate(zip(travelling, in_place, strict=True))
+                if pair[0] != pair[1]
+            ],
+            [55],
+        )
+        self.assertNotEqual(
+            hashlib.sha256(travelling).hexdigest(),
+            hashlib.sha256(in_place).hexdigest(),
+        )
+
 
 class WriterTests(unittest.TestCase):
     APPLY_OPERATION_NAMES = (
@@ -347,7 +597,11 @@ class WriterTests(unittest.TestCase):
         "apply_travel_right_normal",
         "apply_travel_right_slow",
         "apply_travel_right_slowest",
+        "apply_in_place_right_fastest",
+        "apply_in_place_right_fast",
         "apply_in_place_right_normal",
+        "apply_in_place_right_slow",
+        "apply_in_place_right_slowest",
     )
 
     def setUp(self) -> None:
@@ -400,7 +654,11 @@ class WriterTests(unittest.TestCase):
             self.assertFalse(writer.apply_travel_right_normal().physical)
             self.assertFalse(writer.apply_travel_right_slow().physical)
             self.assertFalse(writer.apply_travel_right_slowest().physical)
+            self.assertFalse(writer.apply_in_place_right_fastest().physical)
+            self.assertFalse(writer.apply_in_place_right_fast().physical)
             self.assertFalse(writer.apply_in_place_right_normal().physical)
+            self.assertFalse(writer.apply_in_place_right_slow().physical)
+            self.assertFalse(writer.apply_in_place_right_slowest().physical)
 
     def test_real_preflight_never_opens_hidraw(self) -> None:
         with mock.patch.object(
@@ -439,10 +697,27 @@ class WriterTests(unittest.TestCase):
                 state.travel_right_slowest_frame(),
             ),
             (
+                self._writer().apply_in_place_right_fastest,
+                state.in_place_right_fastest_frame(),
+            ),
+            (
+                self._writer().apply_in_place_right_fast,
+                state.in_place_right_fast_frame(),
+            ),
+            (
                 self._writer().apply_in_place_right_normal,
                 state.in_place_right_normal_frame(),
             ),
+            (
+                self._writer().apply_in_place_right_slow,
+                state.in_place_right_slow_frame(),
+            ),
+            (
+                self._writer().apply_in_place_right_slowest,
+                state.in_place_right_slowest_frame(),
+            ),
         )
+        self.assertEqual(len(operations), len(self.APPLY_OPERATION_NAMES))
         for operation, expected in operations:
             writes: list[bytes] = []
             with mock.patch.object(
@@ -460,14 +735,7 @@ class WriterTests(unittest.TestCase):
             self.assertFalse(any(frame.startswith(b"\x26\x06") for frame in writes))
 
     def test_write_error_and_partial_write_are_never_retried(self) -> None:
-        operation_names = (
-            "apply_travel_right_fastest",
-            "apply_travel_right_fast",
-            "apply_travel_right_normal",
-            "apply_travel_right_slow",
-            "apply_travel_right_slowest",
-        )
-        for operation_name in operation_names:
+        for operation_name in self.APPLY_OPERATION_NAMES:
             for side_effect in (OSError("synthetic"), 511):
                 write = mock.Mock(
                     side_effect=side_effect
@@ -637,8 +905,11 @@ class CliTests(unittest.TestCase):
     def test_help_states_closed_scope(self) -> None:
         result = self.run_cli("--help")
         self.assertEqual(result.returncode, 0)
-        self.assertIn("exactly captured D47, D49 and D50", result.stdout)
-        self.assertIn("not a general 2a 04", result.stdout)
+        # argparse rewraps the description, so compare on collapsed whitespace.
+        described = " ".join(result.stdout.split())
+        self.assertIn("exactly captured D47, D49, D50 and D51", described)
+        self.assertIn("not a general 2a 04", described)
+        self.assertIn("neither derives from the other", described)
 
     def test_offline_commands_require_distinct_exact_tokens(self) -> None:
         cases = (
@@ -663,8 +934,24 @@ class CliTests(unittest.TestCase):
                 alternating.TRAVEL_RIGHT_SLOWEST_CONFIRM_TOKEN,
             ),
             (
+                "apply-in-place-right-fastest",
+                alternating.IN_PLACE_RIGHT_FASTEST_CONFIRM_TOKEN,
+            ),
+            (
+                "apply-in-place-right-fast",
+                alternating.IN_PLACE_RIGHT_FAST_CONFIRM_TOKEN,
+            ),
+            (
                 "apply-in-place-right-normal",
                 alternating.IN_PLACE_RIGHT_NORMAL_CONFIRM_TOKEN,
+            ),
+            (
+                "apply-in-place-right-slow",
+                alternating.IN_PLACE_RIGHT_SLOW_CONFIRM_TOKEN,
+            ),
+            (
+                "apply-in-place-right-slowest",
+                alternating.IN_PLACE_RIGHT_SLOWEST_CONFIRM_TOKEN,
             ),
             ("restore-d32", alternating.RESTORE_CONFIRM_TOKEN),
         )
@@ -678,39 +965,39 @@ class CliTests(unittest.TestCase):
 
     def test_offline_preflight_and_apply_need_no_hardware(self) -> None:
         preflight = self.run_cli("--offline", "preflight")
-        fastest = self.run_cli(
-            "--offline",
-            "apply-travel-right-fastest",
-            alternating.TRAVEL_RIGHT_FASTEST_CONFIRM_TOKEN,
+        self.assertEqual(preflight.returncode, 0, preflight.stderr)
+        self.assertIn("zero hidraw", preflight.stdout)
+        for command, token, _label in APPLY_CLI_OPERATIONS:
+            with self.subTest(command=command):
+                result = self.run_cli("--offline", command, token)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("zero hidraw", result.stdout)
+
+    def test_every_cli_command_is_bound_to_its_own_frozen_frame(self) -> None:
+        """Guard the command-to-frame wiring, where a copy-paste would land.
+
+        The detail line names the exact frozen operation the CLI reached, so
+        an exact match rules out a command silently sending a neighbouring
+        speed. Matching the whole sentence matters because `in-place-right-fast`
+        is a prefix of `in-place-right-fastest`.
+        """
+        self.assertEqual(
+            len(APPLY_CLI_OPERATIONS),
+            len(WriterTests.APPLY_OPERATION_NAMES),
         )
-        fast = self.run_cli(
-            "--offline",
-            "apply-travel-right-fast",
-            alternating.TRAVEL_RIGHT_FAST_CONFIRM_TOKEN,
+        self.assertEqual(
+            len({label for _command, _token, label in APPLY_CLI_OPERATIONS}),
+            len(APPLY_CLI_OPERATIONS),
         )
-        travel = self.run_cli(
-            "--offline",
-            "apply-travel-right-normal",
-            alternating.TRAVEL_RIGHT_NORMAL_CONFIRM_TOKEN,
-        )
-        in_place = self.run_cli(
-            "--offline",
-            "apply-in-place-right-normal",
-            alternating.IN_PLACE_RIGHT_NORMAL_CONFIRM_TOKEN,
-        )
-        slow = self.run_cli(
-            "--offline",
-            "apply-travel-right-slow",
-            alternating.TRAVEL_RIGHT_SLOW_CONFIRM_TOKEN,
-        )
-        slowest = self.run_cli(
-            "--offline",
-            "apply-travel-right-slowest",
-            alternating.TRAVEL_RIGHT_SLOWEST_CONFIRM_TOKEN,
-        )
-        for result in (preflight, fastest, fast, travel, slow, slowest, in_place):
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("zero hidraw", result.stdout)
+        for command, token, label in APPLY_CLI_OPERATIONS:
+            with self.subTest(command=command):
+                result = self.run_cli("--offline", command, token)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    result.stdout.strip(),
+                    "OK: offline %s validation, zero hidraw opens or writes"
+                    % label,
+                )
 
     def test_cli_rejects_payloads_unknown_commands_and_missing_tokens(self) -> None:
         extra = self.run_cli(
