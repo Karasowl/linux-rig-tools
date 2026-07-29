@@ -1059,9 +1059,27 @@ and D50 PCAP SHA-256 is
 The private captures and every relevant frame are re-extracted by the offline
 test suite. D50a is not used to construct any payload.
 
-The four new D49 and D50 operations have mechanical and capture-level
-verification only. They have not yet been written to hardware by this
-laboratory and do not inherit D47's physical QA.
+**Verified by the operator on 2026-07-29:** the four remaining D49 and D50
+speed states were replayed on this board. Before any write, the three private
+PCAPs matched their recorded SHA-256 values, every `2a 04` frame in the
+filtered stream of each capture was re-extracted and matched a frozen state
+with no leftover frame, the exact D32 restoration frame was verified from its
+own private PCAP, the offline restoration check passed, and real preflight
+passed at 42.0 C without opening hidraw. Linux resolved the N9 as
+`/dev/hidraw3` through its exact HID identity. That is a different node number
+than the D47 session used, which confirms that resolution follows the identity
+and not a fixed path. The laboratory then sent `travel-right-fastest` once at
+48.0 C, `travel-right-fast` once at 42.0 C, `travel-right-slow` once at 43.0 C
+and `travel-right-slowest` once at 42.0 C. Each state was observed for 10
+seconds and each was followed by a successful D32 restoration. The final
+preflight passed at 43.0 C with no process retaining a hidraw handle and with
+the heartbeat counter still advancing. The operator confirmed that the four
+states appeared as clearly distinct speeds of the same travelling-right
+effect, in the expected order, and that fans and pump remained normal.
+
+All five travelling-right speed states now have physical QA on this board.
+The laboratory still exposes no D48 state, no in-place speed notch beyond
+Normal and no D51 state.
 
 ### D51: the sub-mode factor is not a rule
 

@@ -186,11 +186,26 @@ seconds, and restored D32 again. The final preflight passed at 63.0 C and no
 process retained a hidraw handle. The operator confirmed that both effects
 looked correct and that fans and pump remained normal.
 
-This physical QA validates only the two exact D47 frames and the two D32
-restorations on this board. The four new D49 and D50 speed operations are
-mechanically verified against their private PCAPs but do not yet have physical
-QA. The laboratory does not expose the opposite direction, in-place speed
-notches beyond Normal, D48 or D51 states. No unmeasured state may be inferred.
+**Verified by the operator on 2026-07-29:** the four remaining D49 and D50
+speed operations were replayed. Before any write, the three private PCAPs
+matched their recorded SHA-256 values, every `2a 04` frame in each capture was
+re-extracted and matched a frozen state with no leftover frame, the exact D32
+restoration frame was verified from its own private PCAP, the offline
+restoration check passed, and real preflight passed at 42.0 C without opening
+hidraw. Linux resolved the N9 as `/dev/hidraw3` through its exact HID identity,
+a different node number than the earlier session used. The laboratory sent
+`travel-right-fastest` once at 48.0 C, `travel-right-fast` once at 42.0 C,
+`travel-right-slow` once at 43.0 C and `travel-right-slowest` once at 42.0 C.
+Each state was observed for 10 seconds and each was followed by a successful
+D32 restoration. The final preflight passed at 43.0 C with no process retaining
+a hidraw handle. The operator confirmed that the four states appeared as
+clearly distinct speeds of the same travelling-right effect, in the expected
+order, and that fans and pump remained normal.
+
+This physical QA covers the five exact travelling-right frames, the exact D47
+in-place frame and their D32 restorations on this board. The laboratory does
+not expose the opposite direction, in-place speed notches beyond Normal, D48 or
+D51 states. No unmeasured state may be inferred.
 
 ## CAM lighting observations
 

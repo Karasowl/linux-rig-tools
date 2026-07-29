@@ -193,12 +193,29 @@ nuevo. El preflight final pasó a 63,0 C y ningún proceso retuvo un handle de
 hidraw. El operador confirmó que ambos efectos se vieron correctamente y que
 los ventiladores y la bomba permanecieron normales.
 
-Este QA físico valida únicamente las dos tramas D47 exactas y las dos
-restauraciones D32 en esta placa. Las cuatro operaciones nuevas de velocidad
-D49 y D50 están verificadas mecánicamente contra sus PCAP privadas, pero aún
-no tienen QA físico. El laboratorio no expone la dirección contraria,
-velocidades en posición distintas de Normal ni estados D48 o D51. No se debe
-inferir ningún estado no medido.
+**Verificado por el operador el 29 de julio de 2026:** se reprodujeron las
+cuatro operaciones de velocidad D49 y D50 que faltaban. Antes de cualquier
+escritura, las tres PCAP privadas coincidieron con sus SHA-256 registrados,
+cada trama `2a 04` de cada captura se reextrajo y coincidió con un estado
+congelado sin ninguna trama sobrante, la trama exacta de restauración D32 se
+verificó desde su propia PCAP privada, la comprobación offline de la
+restauración pasó y el preflight real pasó a 42,0 C sin abrir hidraw. Linux
+resolvió la N9 como `/dev/hidraw3` mediante su identidad HID exacta, un número
+de nodo distinto al de la sesión anterior. El laboratorio envió después
+`travel-right-fastest` una vez a 48,0 C, `travel-right-fast` una vez a 42,0 C,
+`travel-right-slow` una vez a 43,0 C y `travel-right-slowest` una vez a 42,0 C.
+Cada estado se observó durante 10 segundos y cada uno fue seguido de una
+restauración D32 correcta. El preflight final pasó a 43,0 C sin ningún proceso
+reteniendo un handle de hidraw. El operador confirmó que los cuatro estados se
+vieron como velocidades claramente distintas del mismo efecto de desplazamiento
+hacia la derecha, en el orden esperado, y que los ventiladores y la bomba
+permanecieron normales.
+
+Este QA físico cubre las cinco tramas exactas de desplazamiento hacia la
+derecha, la trama exacta D47 en posición y sus restauraciones D32 en esta
+placa. El laboratorio no expone la dirección contraria, velocidades en
+posición distintas de Normal ni estados D48 o D51. No se debe inferir ningún
+estado no medido.
 
 ## Observaciones de iluminación de CAM
 
