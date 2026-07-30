@@ -25,11 +25,15 @@ Living state, evidence and route: [docs/ESTADO-Y-RUTA.md](docs/ESTADO-Y-RUTA.md)
     `bin/nzxt-n9-alternating-write-lab`: closed harnesses that replay exact
     captured 512-byte frames. Not installed, not generic APIs, no encoders.
   - `lib/nzxt_n9_fixed.py`, `lib/nzxt_n9_animated.py`,
-    `lib/nzxt_n9_alternating.py`, covered by 104 offline tests in
+    `lib/nzxt_n9_alternating.py`, covered by 112 offline tests in
     `tools/nzxt-n9/tests/`.
   - Decoded and physically validated on the reference board: Fixed lighting
-    global and per zone, Spectrum Wave D35, Alternating D47, and the five
-    Alternating travelling-right speeds (300, 400, 500, 700, 800).
+    global and per zone, Spectrum Wave D35, and **all twelve Alternating
+    states any capture contains**, which is both full rightward speed tables
+    (travelling 300/400/500/700/800, in-place 600/800/1000/1300/1600) plus the
+    two leftward Normal states, so byte 55 has had all four of its values
+    written to the board. No leftward speed other than Normal is measured
+    anywhere and none may be inferred.
   - Decoded but not written: the other thirteen animated modes, the
     parameterized `26 06` of Marquee and Wave, and the `26 14` audio stream.
   - Not captured at all yet: the whole Cooling page, so no RPM, temperature,
@@ -74,16 +78,18 @@ Living state, evidence and route: [docs/ESTADO-Y-RUTA.md](docs/ESTADO-Y-RUTA.md)
 
 ## Next step
 
-Finish N9 lighting before touching cooling. In order:
+Finish N9 lighting before touching cooling. Alternating is now closed for
+every state a capture contains, so what remains needs **new captures** rather
+than new labs. In order:
 
-1. Closed write lab for the D51 `in-place-right` speed table
-   (600, 800, 1000, 1300, 1600), same method as the D49 and D50 lab.
-2. Alternating leftward direction from D48, kept last because its attribution
-   is weaker.
-3. Measure the five speed notches of the modes other than Alternating.
-   Breathing has three of five and Spectrum Wave two of five today.
-4. Retry Temperature Monitor, which has a triple negative result in the VM
+1. Measure the five speed notches of the modes other than Alternating.
+   Breathing has three of five and Spectrum Wave two of five today. After D51
+   these cannot be projected from a known table, they have to be measured one
+   by one, and they batch well into a single window.
+2. Retry Temperature Monitor, which has a triple negative result in the VM
    (D42, D46, D47) and has never transmitted a frame.
+3. If the leftward sub-mode ever needs a speed table, capture a leftward
+   sweep. CAM was never swept leftward, so nothing exists to freeze today.
 
 After lighting closes, Macroetapa 3 is the N9 Cooling page, the highest-risk
 stage of the project.

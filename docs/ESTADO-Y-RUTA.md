@@ -1,6 +1,6 @@
 # Estado, método y ruta del proyecto
 
-Actualizado: 29 de julio de 2026.
+Actualizado: 30 de julio de 2026.
 
 Este es el documento descriptivo vivo de `linux-rig-tools`. Explica qué se ha
 hecho, por qué se hizo, qué evidencia existe, qué falta y cómo se controla el
@@ -34,10 +34,12 @@ Superficies de laboratorio, ninguna instalada en el sistema:
 - `nzxt-n9-lab`, interfaz PyQt6 del vector Fixed de 49 zonas.
 - `nzxt-n9-first-write-lab`, arnés de la primera escritura Fixed.
 - `nzxt-n9-animated-write-lab`, arnés de la trama Spectrum Wave D35.
-- `nzxt-n9-alternating-write-lab`, arnés de seis tramas Alternating exactas
-  de D47, D49 y D50.
+- `nzxt-n9-alternating-write-lab`, arnés de doce tramas Alternating exactas
+  de D47, D48, D49, D50 y D51. Son las dos tablas de velocidad completas hacia
+  la derecha, cinco muescas cada una, más los dos estados Normal hacia la
+  izquierda, con lo que el byte 55 queda cerrado con sus cuatro valores.
 
-Las tres bibliotecas del N9 y sus arneses están cubiertos por 104 pruebas
+Las tres bibliotecas del N9 y sus arneses están cubiertos por 112 pruebas
 offline en `tools/nzxt-n9/tests/`.
 
 El 21 de julio de 2026 Linux completó dos ciclos de iluminación integrada de la
@@ -54,8 +56,7 @@ evidencia descriptiva. No es una API genérica y no está instalado en el
 sistema.
 
 Después del primer hito, Linux también reprodujo físicamente tramas de modos
-animados. Estados con QA físico aprobado por el operador y publicados en
-`master`:
+animados. Estados con QA físico aprobado por el operador:
 
 | Estado | Fecha del QA | Origen |
 | --- | --- | --- |
@@ -66,10 +67,28 @@ animados. Estados con QA físico aprobado por el operador y publicados en
 | Alternating con desplazamiento, Fast 400 | 29 de julio de 2026 | D50 |
 | Alternating con desplazamiento, Slow 700 | 29 de julio de 2026 | D50 |
 | Alternating con desplazamiento, Slowest 800 | 29 de julio de 2026 | D49 |
+| Alternating en posición, Fastest 600 | 29 de julio de 2026 | D51 |
+| Alternating en posición, Fast 800 | 29 de julio de 2026 | D51 |
+| Alternating en posición, Slow 1300 | 29 de julio de 2026 | D51 |
+| Alternating en posición, Slowest 1600 | 29 de julio de 2026 | D51 |
+| Alternating con desplazamiento a la izquierda, Normal | 30 de julio de 2026 | D48 |
+| Alternating en posición a la izquierda, Normal | 30 de julio de 2026 | D48 |
+
+Todo salvo las dos últimas filas está publicado en `master`. Las dos de D48
+están en un commit local todavía sin publicar.
 
 Cada uno es una trama capturada completa de 512 bytes, anclada por SHA-256 y
 enviada una sola vez, con restauración D32 posterior. No existe encoder de
 modos animados ni ninguna especificación de campos apta para escribir.
+
+Las dos filas de D48 no cierran igual sus dos mitades. La inversión del
+recorrido se registró de antemano como visible y se vio, así que la dirección
+de `03` está corroborada físicamente. El par en el sitio se registró de
+antemano como posiblemente indistinguible, porque con la propagación apagada
+un cambio de dirección es solo una inversión de fase de una conmutación que no
+se desplaza, así que ahí el QA solo establece que `02` se acepta y se
+representa con normalidad. Su nombre sigue apoyado en la eliminación dentro del
+campo cerrado de dos bits.
 
 Desde el estado actual faltan:
 
@@ -963,18 +982,20 @@ familia `26 06` parametrizada de Marquee y Wave y el streaming `26 14` de los
 modos de audio. D47 a D51 cerraron las dos curvas de velocidad de Alternating
 y demostraron que la escala es una tabla y no una función.
 
-Entre el 27 y el 29 de julio de 2026 la decodificación pasó a demostración
-física por trama congelada, con Spectrum Wave D35, Alternating D47 y las
-cinco velocidades con desplazamiento de D49 y D50 ya publicadas en `master`
-con QA físico aprobado.
+Entre el 27 y el 30 de julio de 2026 la decodificación pasó a demostración
+física por trama congelada. Ya tienen QA físico aprobado Spectrum Wave D35,
+los dos Normal de Alternating de D47, las cinco velocidades con desplazamiento
+de D49 y D50, las cuatro muescas en el sitio de D51 y los dos Normal hacia la
+izquierda de D48. Todo salvo lo último está publicado en `master`.
+
+Con eso Alternating queda cerrado en todos los estados que existe en alguna
+captura. Sus dos tablas de velocidad están completas y sus cuatro valores de
+dirección y propagación se han escrito en la placa. Lo que falta de ese modo
+no está medido en ninguna parte, empezando por cualquier velocidad hacia la
+izquierda distinta de Normal, y no se puede inferir.
 
 Los pendientes concretos de iluminación, en orden natural:
 
-- Laboratorio cerrado para la tabla `in-place-right` de D51, con las muescas
-  600, 800, 1000, 1300 y 1600, por el mismo método de trama congelada. Es la
-  única tabla de Alternating medida que todavía no tiene laboratorio.
-- Dirección izquierda de Alternating a partir de D48, deliberadamente al
-  final porque su atribución es menos rigurosa que la de D47, D49 y D50.
 - Reintentar Temperature Monitor, quizá tras reiniciar CAM o con otra fuente
   de temperatura, para determinar su patrón de transporte. Hoy tiene triple
   resultado negativo en la VM (D42, D46 y D47) y ninguna trama capturada.

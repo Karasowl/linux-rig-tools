@@ -273,8 +273,20 @@ menos de escrutinio que las anteriores.
 
 Las dos tablas de velocidad de Alternating ya tienen QA físico en esta placa.
 
-Las dos tramas hacia la izquierda de D48 solo tienen verificación mecánica y de
-captura, y todavía no tienen QA físico. Su evidencia se auditó antes de
+Las dos tramas hacia la izquierda de D48 se reprodujeron en esta placa el
+2026-07-30, como un A/B/A/B contra sus contrapartes hacia la derecha ya
+validadas, porque una dirección no se puede juzgar viendo un estado aislado.
+Salieron ocho tramas, cada una una sola vez, cada una sostenida 10 segundos,
+cada una con resultado correcto, y después una restauración D32 correcta. La
+inversión del recorrido se registró de antemano como visible y se vio, así que
+`03` queda corroborado físicamente. El par en el sitio se registró de antemano
+como posiblemente indistinguible, porque con la propagación apagada un cambio de
+dirección es solo una inversión de fase de una conmutación que no se desplaza,
+así que esa mitad solo establece que `02` se acepta y se representa con
+normalidad. Los cuatro valores del byte 55 ya se escribieron en esta placa y los
+cuatro se representan correctamente.
+
+Su evidencia se auditó antes de
 congelarlas. D48 resultó ser la ventana más corroborada de la serie: seis de
 sus nueve escrituras reproducen byte a byte estados ya congelados de D47, D49,
 D50 y D51, y la suite offline comprueba la lista completa de las nueve, así que

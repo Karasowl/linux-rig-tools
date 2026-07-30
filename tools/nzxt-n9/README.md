@@ -259,8 +259,19 @@ unit has one less layer of scrutiny than the earlier ones.
 
 Both Alternating speed tables now have physical QA on this board.
 
-The two D48 leftward frames have mechanical and capture-level verification
-only and no physical QA yet. Their evidence was audited before freezing them.
+The two D48 leftward frames were replayed on this board on 2026-07-30, as an
+A/B/A/B against their already validated rightward counterparts, because a
+direction cannot be judged from one state seen in isolation. Eight frames went
+out, each once, each held 10 seconds, each returning OK, followed by one
+successful D32 restoration. The travelling inversion was pre-registered as
+visible and was seen, so `03` is physically corroborated. The in-place pair was
+pre-registered as possibly indistinguishable, since with propagation off a
+direction change is only a phase inversion of a toggle that does not move, so
+that half establishes only that `02` is accepted and renders normally. All four
+values of byte 55 have now been written to this board and all four render
+correctly.
+
+Their evidence was audited before freezing them.
 D48 is in fact the most cross-validated window in the series: six of its nine
 writes reproduce states frozen from D47, D49, D50 and D51 byte for byte, and
 the offline suite asserts the whole nine-write list, so those six act as

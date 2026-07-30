@@ -1171,7 +1171,37 @@ its SHA-256 kept in the window sidecar. Every other window keeps its raw.
 
 No leftward speed other than Normal exists in any capture, so the leftward
 sub-modes have no speed table and none may be inferred from the rightward
-ones. These two states have no physical QA yet.
+ones.
+
+**Verified by the operator on 2026-07-30.** Because a direction cannot be
+judged from one state seen in isolation, the cycle was run as an A/B/A/B
+against the already validated rightward counterpart rather than as two lone
+writes. Real preflight passed at 59.0 C without opening hidraw, and the two
+new frames were re-checked against their counterparts immediately before the
+run: each differs in exactly one byte, 55, and only in bit 1. The laboratory
+then sent eight frames, each exactly once, each held 10 seconds, with no retry
+anywhere: `travel-right-normal`, `travel-left-normal`, `travel-right-normal`,
+`travel-left-normal`, `in-place-right-normal`, `in-place-left-normal`,
+`in-place-right-normal`, `in-place-left-normal`, followed by one successful
+D32 restoration. Every write returned OK, CPU Package stayed between 53.0 and
+70.0 C, and the controller never stalled. The operator confirmed the run
+matched the expectation registered before it started.
+
+That expectation was deliberately asymmetric, so the two halves do not close
+to the same degree:
+
+- The **travelling** pair was pre-registered as a visible inversion, and it
+  was observed as such. `03` is physically corroborated as travelling leftward.
+- The **in-place** pair was pre-registered as possibly indistinguishable,
+  because with propagation off a direction change is only a phase inversion of
+  a toggle that does not move. The confirmation therefore establishes that
+  `02` is accepted and renders normally, not that its direction was seen.
+  Its leftward naming still rests on elimination within the closed two-bit
+  field, which is the same footing it had before the cycle.
+
+With this, all four values of byte 55 have been written to this board and all
+four render correctly. Alternating is closed for every state any capture
+contains.
 
 ### D51: the sub-mode factor is not a rule
 
