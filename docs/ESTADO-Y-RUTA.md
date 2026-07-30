@@ -74,8 +74,7 @@ animados. Estados con QA físico aprobado por el operador:
 | Alternating con desplazamiento a la izquierda, Normal | 30 de julio de 2026 | D48 |
 | Alternating en posición a la izquierda, Normal | 30 de julio de 2026 | D48 |
 
-Todo salvo las dos últimas filas está publicado en `master`. Las dos de D48
-están en un commit local todavía sin publicar.
+Todos están publicados en `master`.
 
 Cada uno es una trama capturada completa de 512 bytes, anclada por SHA-256 y
 enviada una sola vez, con restauración D32 posterior. No existe encoder de
@@ -986,7 +985,7 @@ Entre el 27 y el 30 de julio de 2026 la decodificación pasó a demostración
 física por trama congelada. Ya tienen QA físico aprobado Spectrum Wave D35,
 los dos Normal de Alternating de D47, las cinco velocidades con desplazamiento
 de D49 y D50, las cuatro muescas en el sitio de D51 y los dos Normal hacia la
-izquierda de D48. Todo salvo lo último está publicado en `master`.
+izquierda de D48, todos publicados en `master`.
 
 Con eso Alternating queda cerrado en todos los estados que existe en alguna
 captura. Sus dos tablas de velocidad están completas y sus cuatro valores de
