@@ -82,10 +82,17 @@ Finish N9 lighting before touching cooling. Alternating is now closed for
 every state a capture contains, so what remains needs **new captures** rather
 than new labs. In order:
 
-1. Measure the five speed notches of the modes other than Alternating.
-   Breathing has three of five and Spectrum Wave two of five today. After D51
-   these cannot be projected from a known table, they have to be measured one
-   by one, and they batch well into a single window.
+1. **D52, the batched per-mode speed sweep.** The full protocol, gesture
+   order and pre-registered predictions are in
+   [docs/NZXT-N9-CAM-LIGHTING.md](docs/NZXT-N9-CAM-LIGHTING.md) under
+   `Recommended next capture matrix`. It measures the five notches of every
+   `2a 04` mode with a speed track and re-measures the in-place `Slow` value
+   of 1300, the only number in either Alternating table with a single
+   observation. Two points matter if you touch that plan: the sweep starts by
+   saturating an end because CAM remembers a per-mode notch and the recorded
+   single values are **not** known to be `Normal`, and Spectrum Wave and
+   Breathing are swept first so their already measured values validate the
+   protocol before it is trusted on modes where nothing is known.
 2. Retry Temperature Monitor, which has a triple negative result in the VM
    (D42, D46, D47) and has never transmitted a frame.
 3. If the leftward sub-mode ever needs a speed table, capture a leftward

@@ -1278,16 +1278,71 @@ The observed anomaly is therefore limited to lighting for the radiator fans. The
 
 Do not run these captures concurrently. Change one visible variable per window, record the starting state, confirm the ending tooltip or UI state, and restore the baseline in a separate window.
 
+Physical appearance claims require explicit operator observation. Automated screenshots can verify CAM state only. No packet replay should be attempted from this matrix.
+
+### D52, the batched per-mode speed sweep
+
+This is the highest-value window left in lighting. Alternating is closed for every state a capture contains, so what remains is not new labs but new measurements, and after D50 and D51 none of them can be projected from a known table. They can, however, all be swept in one CAM session, because the variable is the same control in every mode and the attribution is by monotone order rather than by narration.
+
+**Objective.** Measure the five speed notches of every `2a 04` mode that exposes a speed track, and give the in-place `Slow` value of 1300 a second independent observation.
+
+**The saturation anchor.** CAM remembers a per-mode speed state, so the notch a mode starts on is unknown. The single values recorded for the eleven one-window modes in the identifier table are that remembered state and are **not** known to be `Normal`. Do not start clicking from wherever the slider happens to sit. For each mode:
+
+1. Press the fast arrow six times. The track has exactly five positions and saturates silently at both ends, verified at the slow end in D50 and the fast end in D51, so after six presses the mode sits at `Fastest` no matter where it started, and the surplus presses transmit nothing.
+2. Step to the slow end one press at a time, four presses. This transmits `Fast`, `Normal`, `Slow` and `Slowest` in that order, and their identity is certain because the start was saturated rather than assumed.
+3. Step back to the fast end, four presses. This transmits `Slow`, `Normal`, `Fast` and `Fastest`.
+
+The union is all five notches. `Fast`, `Normal` and `Slow` are each captured twice inside the same mode, which is a built-in consistency control. `Fastest` and `Slowest` appear once each by construction, because an end position can only be arrived at from inside.
+
+**Gesture order.** The control first, then the two modes that can validate the protocol, then the unknowns.
+
+| Segment | Mode | ID | Why it is here |
+| --- | --- | ---: | --- |
+| Control | `Alternating` in place, `Slow` only | `05` | The only value in either Alternating table with a single observation. Everything else appears in two or three windows |
+| Protocol check | `Spectrum Wave` | `02` | `Normal` 250 and `Fast` 150 are already measured, so the sweep must reproduce them |
+| Protocol check | `Breathing` | `07` | `Slowest` 40, `Normal` 20 and `Fastest` 4 are already measured, and it is the widest known range |
+| Unknown | `Fading` | `01` | |
+| Unknown | `Covering Marquee` | `04` | |
+| Unknown | `Pulse` | `06` | |
+| Unknown | `Starry Night` | `09` | Carries byte 55 `01` with no movement switch in the UI, so record byte 55 at every stop |
+| Unknown | `Rainbow Flow` | `0b` | |
+| Unknown | `Super Rainbow` | `0c` | |
+| Unknown | `Rainbow Pulse` | `0d` | |
+| Unknown | `Tai Chi` | `0e` | |
+| Unknown | `Water Cooler` | `0f` | |
+| Unknown | `Loading` | `10` | |
+| Record only | `Candle` | `08` | Its UI exposes no speed control, so select it and click nothing |
+
+Running the two protocol checks before the unknowns is deliberate. If the sweep reproduces values that were measured in earlier windows by a different method, the protocol itself is validated before it is trusted on modes where nothing is known.
+
+**Out of scope for this window.** `Marquee` and `Wave` use the `26 04` plus parameterized `26 06` family rather than `2a 04`, so their speed lives elsewhere and deserves its own window. The audio modes stream over `26 14`. Temperature Monitor has a triple negative result and is a separate investigation, not a speed question.
+
+**Predictions registered before the capture.** This is the D49 to D51 discipline, and its point is that a projection which turns out wrong gets caught instead of quietly entering a table.
+
+- **P1, the control.** Alternating in place at `Slow` re-transmits exactly `14 05`, decimal 1300. If it transmits `78 05`, decimal 1400, then the in-place table, its frozen frame and the lab operation built on it are all wrong and must be rebuilt.
+- **P2.** Inside every mode the down sweep and the up sweep agree byte for byte at `Fast`, `Normal` and `Slow`.
+- **P3.** No mode reproduces the Alternating shape of 0.6, 0.8, 1.0, 1.4 and 1.6 times its own `Normal`. Three points already contradict it, Spectrum Wave `Fast` at 0.6 and Breathing `Fastest` at 0.2 and `Slowest` at 2.0.
+- **P4.** Speed is monotone in UI order for every mode, with the lower raw value meaning faster.
+- **P5.** Candle transmits nothing on any speed gesture and its bytes 5-6 stay at 50 for the whole window.
+
+**Pauses.** Five seconds between the steps inside a mode is enough, because there the attribution rests on monotone order. Keep the twelve second pause used by D39 to D42 between modes, because there it rests on narrated order.
+
+**Traps this window must not fall into.**
+
+- Silent saturation is the verified behaviour at both ends. Surplus presses transmitting nothing is the expected result and must not be read as a lost capture or a dead session.
+- Touch no other control. Brightness is baked into the colour entries, so a single brightness step would rewrite bytes 8 onward and break the one variable rule.
+- Candle also carries an unexplained `56` at byte 7 alongside its unexplained 50. Confirm what it transmits on selection and change nothing.
+- This window produces measurements only. No frame from it may be frozen into a lab until its values are extracted and cross-checked against the sidecar.
+
+### Still open from the earlier matrix
+
 | Priority | One variable | Controlled states or action | Required confirmation |
 | --- | --- | --- | --- |
 | 1 | Independently visible brightness | Establish a fresh exact percentage using the verified focused-arrow method before another color capture | Tooltip before and after, one isolated target write, and no reliance on a prior reported percentage. Automated QMP hover did not expose the tooltip in D18 |
 | 2 | Same color at another exact brightness | Repeat one non-binary color only after the percentage is visibly confirmed | Test whether the fitted component transform changes with brightness as predicted, without assuming the 7% fit generalizes |
 | 3 | Per-zone color | One known map region, one color change | Region selection and unchanged global remainder |
-| 4 | Effect selection | `Fixed` to one effect, then restore `Fixed` | Exact effect label and physical result |
-| 5 | Speed | One step only on a single effect | Visible speed label before and after |
-| 6 | Direction | One arrow selection only on a single effect | Visible direction before and after |
 
-Physical appearance claims require explicit operator observation. Automated screenshots can verify CAM state only. No packet replay should be attempted from this matrix.
+Effect selection, speed and direction have left this matrix. Selection was enumerated across D39 to D41, direction was verified in two modes, and speed is now the subject of D52 above.
 
 ## Protocol opcode map
 

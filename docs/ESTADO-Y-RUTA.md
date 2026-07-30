@@ -995,17 +995,29 @@ izquierda distinta de Normal, y no se puede inferir.
 
 Los pendientes concretos de iluminación, en orden natural:
 
+- **D52, barrido de velocidad por modo en lote.** Es lo más rentable que
+  queda. Mide las cinco muescas de todos los modos `2a 04` con pista de
+  velocidad, que hoy son unos sesenta valores desconocidos, y de paso vuelve a
+  medir el 1300 en el sitio. El protocolo completo, el orden de gestos y las
+  predicciones registradas de antemano están en
+  [NZXT-N9-CAM-LIGHTING.md](NZXT-N9-CAM-LIGHTING.md), en `Recommended next
+  capture matrix`. Dos ideas lo sostienen: el barrido arranca saturando un
+  extremo, porque CAM recuerda la muesca por modo y los valores sueltos
+  registrados de once modos **no** se sabe que sean `Normal`, y Spectrum Wave
+  y Breathing van primero para que sus valores ya medidos validen el
+  protocolo antes de aplicarlo donde no se conoce nada.
+- Dar una segunda observación al `Slow` en el sitio, 1300. Es el único valor
+  de las dos tablas de Alternating con una sola medición, mientras que los
+  otros nueve aparecen en dos o tres ventanas. Va como primer gesto de D52 y
+  cuesta un clic. La evidencia actual lo sostiene: la captura conserva su
+  SHA-256, los bytes 5 y 6 son `14 05`, un 1400 sería `78 05`, y 1400 no
+  aparece en ninguna de las nueve capturas que tocan Alternating.
 - Reintentar Temperature Monitor, quizá tras reiniciar CAM o con otra fuente
   de temperatura, para determinar su patrón de transporte. Hoy tiene triple
   resultado negativo en la VM (D42, D46 y D47) y ninguna trama capturada.
-- Medir las cinco muescas de los modos distintos de Alternating. Hoy
-  Breathing tiene tres de cinco y Spectrum Wave dos de cinco, y el resto
-  ninguna. Tras D51 no cabe proyectarlas: hay que medirlas una a una.
 - Investigar la causa de la desviación de Slow entre submodos. Es compatible
   con un redondeo de un periodo interno, con dos tablas escritas a mano en
   CAM o con otra unidad en ese tramo. Nada de eso está probado.
-- Medir las escalas de velocidad de los modos distintos de Breathing y
-  Alternating. Son la mayoría y admiten una ventana en lote.
 
 Aparcado a propósito hasta terminar la decodificación, decidido el 25 de
 julio de 2026: la limpieza de los PCAP históricos grandes. `usbmon` captura
