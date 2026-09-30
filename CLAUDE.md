@@ -92,9 +92,19 @@ than new labs. In order:
    saturating an end because CAM remembers a per-mode notch and the recorded
    single values are **not** known to be `Normal`, and Spectrum Wave and
    Breathing are swept first so their already measured values validate the
-   protocol before it is trusted on modes where nothing is known.
-2. Retry Temperature Monitor, which has a triple negative result in the VM
-   (D42, D46, D47) and has never transmitted a frame.
+   protocol before it is trusted on modes where nothing is known. The cadence
+   is 4 s inside a mode and 6 s between modes rather than the 12 s of D39-D42,
+   because there the narration was the only evidence of which mode was
+   selected while here the frames label themselves (byte 4 for the mode, bytes
+   5-6 for the notch). The cadence is validated inside the window: eight
+   writes per swept mode, and the down and up sweeps must agree byte for byte
+   at `Fast`, `Normal` and `Slow`.
+2. **Retry Temperature Monitor as the appended final segment of D52**, after
+   the sweep closes and separated by an announced pause of at least 30 s. It
+   has a triple negative result in the VM (D42, D46, D47) and has never
+   transmitted a frame, so its transport pattern is the only unknown one left
+   in the lighting surface. It goes last on purpose, so that a mode whose
+   behaviour is unknown cannot contaminate the sweep.
 3. If the leftward sub-mode ever needs a speed table, capture a leftward
    sweep. CAM was never swept leftward, so nothing exists to freeze today.
 

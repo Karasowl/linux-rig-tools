@@ -1006,15 +1006,37 @@ Los pendientes concretos de iluminación, en orden natural:
   registrados de once modos **no** se sabe que sean `Normal`, y Spectrum Wave
   y Breathing van primero para que sus valores ya medidos validen el
   protocolo antes de aplicarlo donde no se conoce nada.
+  La cadencia es de cuatro segundos dentro de un modo y seis entre modos, no
+  los doce de D39 a D42. La diferencia no es una relajación del rigor sino
+  que en D39 la narración era la única evidencia de qué modo estaba
+  seleccionado, mientras que aquí las tramas se etiquetan solas: un cambio de
+  modo se ve en el byte 4 y un paso de velocidad en los bytes 5 y 6 con el
+  byte 4 quieto. Además la cadencia se valida a sí misma dentro de la
+  ventana, porque cada modo barrido debe producir exactamente ocho escrituras
+  y los tramos de bajada y subida deben coincidir byte a byte en `Fast`,
+  `Normal` y `Slow`. Si CAM agrupara o perdiera pulsaciones a esa velocidad,
+  las dos comprobaciones fallan en Spectrum Wave y Breathing, que van
+  primero, antes de llegar a ningún modo desconocido. Son unos catorce
+  minutos de gestos.
 - Dar una segunda observación al `Slow` en el sitio, 1300. Es el único valor
   de las dos tablas de Alternating con una sola medición, mientras que los
   otros nueve aparecen en dos o tres ventanas. Va como primer gesto de D52 y
   cuesta un clic. La evidencia actual lo sostiene: la captura conserva su
   SHA-256, los bytes 5 y 6 son `14 05`, un 1400 sería `78 05`, y 1400 no
   aparece en ninguna de las nueve capturas que tocan Alternating.
-- Reintentar Temperature Monitor, quizá tras reiniciar CAM o con otra fuente
-  de temperatura, para determinar su patrón de transporte. Hoy tiene triple
-  resultado negativo en la VM (D42, D46 y D47) y ninguna trama capturada.
+- Reintentar Temperature Monitor para determinar su patrón de transporte, el
+  único que sigue siendo desconocido en toda la superficie de iluminación.
+  Hoy tiene triple resultado negativo en la VM (D42, D46 y D47) y ninguna
+  trama capturada. Va como **segmento añadido al final de D52**, después de
+  cerrar el barrido y separado por una pausa anunciada de al menos treinta
+  segundos, porque comparte la sesión pero no la variable. Va último a
+  propósito: un modo que nunca ha transmitido es también un modo cuyo
+  comportamiento se desconoce, y si hiciera algo inesperado en medio del
+  barrido contagiaría la duda a todos los valores posteriores. La predicción
+  registrada es que vuelva a no transmitir nada. Si aparece una trama, lo que
+  se ha descubierto es que los tres negativos anteriores tenían una causa que
+  esta ventana cambió, así que lo primero es averiguar qué fue distinto y no
+  dar por hecho que el modo simplemente funciona.
 - Investigar la causa de la desviación de Slow entre submodos. Es compatible
   con un redondeo de un periodo interno, con dos tablas escritas a mano en
   CAM o con otra unidad en ese tramo. Nada de eso está probado.

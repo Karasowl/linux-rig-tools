@@ -1284,7 +1284,7 @@ Physical appearance claims require explicit operator observation. Automated scre
 
 This is the highest-value window left in lighting. Alternating is closed for every state a capture contains, so what remains is not new labs but new measurements, and after D50 and D51 none of them can be projected from a known table. They can, however, all be swept in one CAM session, because the variable is the same control in every mode and the attribution is by monotone order rather than by narration.
 
-**Objective.** Measure the five speed notches of every `2a 04` mode that exposes a speed track, and give the in-place `Slow` value of 1300 a second independent observation.
+**Objective.** Measure the five speed notches of every `2a 04` mode that exposes a speed track, and give the in-place `Slow` value of 1300 a second independent observation. A fourth segment, appended after the sweep and separated from it, retries Temperature Monitor. It shares the session but not the variable, and it is placed last so that anything it does cannot contaminate the sweep.
 
 **The saturation anchor.** CAM remembers a per-mode speed state, so the notch a mode starts on is unknown. The single values recorded for the eleven one-window modes in the identifier table are that remembered state and are **not** known to be `Normal`. Do not start clicking from wherever the slider happens to sit. For each mode:
 
@@ -1298,7 +1298,7 @@ The union is all five notches. `Fast`, `Normal` and `Slow` are each captured twi
 
 | Segment | Mode | ID | Why it is here |
 | --- | --- | ---: | --- |
-| Control | `Alternating` in place, `Slow` only | `05` | The only value in either Alternating table with a single observation. Everything else appears in two or three windows |
+| Control | `Alternating` in place, full sweep | `05` | The strongest control available, because **all five** of its in-place values are already measured (1600, 1300, 1000, 800, 600), so every notch of the sweep has a single admissible answer. It also gives the in-place `Slow` of 1300 the second observation it needs, at the same cost as measuring it alone |
 | Protocol check | `Spectrum Wave` | `02` | `Normal` 250 and `Fast` 150 are already measured, so the sweep must reproduce them |
 | Protocol check | `Breathing` | `07` | `Slowest` 40, `Normal` 20 and `Fastest` 4 are already measured, and it is the widest known range |
 | Unknown | `Fading` | `01` | |
@@ -1315,17 +1315,31 @@ The union is all five notches. `Fast`, `Normal` and `Slow` are each captured twi
 
 Running the two protocol checks before the unknowns is deliberate. If the sweep reproduces values that were measured in earlier windows by a different method, the protocol itself is validated before it is trusted on modes where nothing is known.
 
-**Out of scope for this window.** `Marquee` and `Wave` use the `26 04` plus parameterized `26 06` family rather than `2a 04`, so their speed lives elsewhere and deserves its own window. The audio modes stream over `26 14`. Temperature Monitor has a triple negative result and is a separate investigation, not a speed question.
+**Out of scope for this window.** `Marquee` and `Wave` use the `26 04` plus parameterized `26 06` family rather than `2a 04`, so their speed lives elsewhere and deserves its own window. The audio modes stream over `26 14`. Brightness stays untouched for the whole session, including the appended segment, because it is baked into the colour entries and one step would rewrite bytes 8 onward.
 
 **Predictions registered before the capture.** This is the D49 to D51 discipline, and its point is that a projection which turns out wrong gets caught instead of quietly entering a table.
 
-- **P1, the control.** Alternating in place at `Slow` re-transmits exactly `14 05`, decimal 1300. If it transmits `78 05`, decimal 1400, then the in-place table, its frozen frame and the lab operation built on it are all wrong and must be rebuilt.
+- **P1, the control.** The Alternating in-place sweep reproduces all five measured values exactly: `Slowest` 1600, `Slow` **1300**, `Normal` 1000, `Fast` 800 and `Fastest` 600. The `Slow` value is the one that matters most, because it is the only number in either Alternating table with a single observation. If it transmits `78 05`, decimal 1400, then the in-place table, its frozen frame and the lab operation built on it are all wrong and must be rebuilt. If any of the other four disagrees, the sweep protocol itself is wrong and nothing later in the window can be trusted.
 - **P2.** Inside every mode the down sweep and the up sweep agree byte for byte at `Fast`, `Normal` and `Slow`.
 - **P3.** No mode reproduces the Alternating shape of 0.6, 0.8, 1.0, 1.4 and 1.6 times its own `Normal`. Three points already contradict it, Spectrum Wave `Fast` at 0.6 and Breathing `Fastest` at 0.2 and `Slowest` at 2.0.
 - **P4.** Speed is monotone in UI order for every mode, with the lower raw value meaning faster.
 - **P5.** Candle transmits nothing on any speed gesture and its bytes 5-6 stay at 50 for the whole window.
+- **P6, the appended segment.** Temperature Monitor transmits nothing again, making it a fourth negative. This is the prediction the evidence supports, and registering it matters precisely because a negative is the expected outcome: if a frame does appear, the result is that the previous three negatives had a cause that this window changed, and the first thing to check is what differed rather than assuming the mode simply started working.
 
-**Pauses.** Five seconds between the steps inside a mode is enough, because there the attribution rests on monotone order. Keep the twelve second pause used by D39 to D42 between modes, because there it rests on narrated order.
+**Pauses: four seconds inside a mode, six between modes.** This is deliberately faster than the twelve seconds D39 to D42 used, and the reason the earlier figure does not apply is worth stating, because it is the difference between the two windows rather than a relaxation of rigour.
+
+In D39 to D42 the narration was the **only** evidence of which mode had been selected. A write that landed ambiguously between two announced gestures broke the chain for everything after it, so the pause had to be long enough that no two gestures could ever be confused.
+
+In D52 the frames label themselves. A mode change is visible as a new constant at byte 4, and a speed step is visible as bytes 5 and 6 moving with byte 4 held still. Attribution therefore rests on frame content plus monotone order, not on a gap in the timeline. The pause no longer carries the identification, so it only has to be long enough that CAM processes each keypress as its own event.
+
+**The cadence validates itself.** Whether four seconds is in fact long enough for CAM is not assumed, it is measured inside the window by two independent checks that both fail loudly if it is not:
+
+- Every swept mode must produce **exactly eight** writes for its eight stepping presses, with the six saturation presses transmitting whatever remains to reach the end and nothing after it.
+- P2 requires the down sweep and the up sweep to agree byte for byte at `Fast`, `Normal` and `Slow`. Coalesced or dropped presses shift one sweep against the other and break that agreement.
+
+Running `Spectrum Wave` and `Breathing` first therefore now validates two things rather than one. Their already measured values confirm the method, and reproducing them at this cadence confirms the cadence. If either check fails in those two modes, stop and re-run the window slower rather than continuing into the unknown modes.
+
+At this cadence the sweep is roughly fourteen minutes of gestures. The twelve second figure would have added about two and a half minutes in total, so the cost of the old pause was never the bottleneck. The reason to shorten it is that it stopped being load-bearing, not that it was expensive.
 
 **Traps this window must not fall into.**
 
@@ -1333,6 +1347,12 @@ Running the two protocol checks before the unknowns is deliberate. If the sweep 
 - Touch no other control. Brightness is baked into the colour entries, so a single brightness step would rewrite bytes 8 onward and break the one variable rule.
 - Candle also carries an unexplained `56` at byte 7 alongside its unexplained 50. Confirm what it transmits on selection and change nothing.
 - This window produces measurements only. No frame from it may be frozen into a lab until its values are extracted and cross-checked against the sidecar.
+
+**Appended segment, the Temperature Monitor retry.** Temperature Monitor has transmitted nothing in three independent windows (D42, D46 and D47), so its transport pattern is the only one in the lighting surface that stays **unknown**. It is not a speed question and it is not part of the sweep, but it costs one selection and a wait, and the session is already mounted.
+
+It goes **last**, after the sweep is complete, separated by an announced pause of at least thirty seconds so the boundary between the two segments is unambiguous in the timeline. The order matters: a mode that has never transmitted is also a mode whose behaviour is unknown, and if it were to do something unexpected in the middle of the sweep, every value after it would inherit the doubt.
+
+Method for the segment: select Temperature Monitor, wait sixty seconds without touching anything, and hold the tail before stopping the capture. Record whether CAM shows a temperature reading at all, because a mode that displays nothing and a mode that displays a value while transmitting nothing are different findings. Change no other control, and in particular do not attempt to change the temperature source, since that would make this a second variable rather than a fourth observation of the same one.
 
 ### Still open from the earlier matrix
 
